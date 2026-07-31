@@ -124,14 +124,28 @@ deixar o Studio aberto. Criar/agendar e iniciar uma live inteiramente pelo APK e
 login OAuth do Google e chamadas autenticadas à YouTube Live Streaming API
 (`liveBroadcasts`, `liveStreams`, `bind` e `transition`); a chave de ingestão sozinha
 não autoriza essas operações administrativas e não deve ser usada como substituta do
-OAuth.
+OAuth. O app agora implementa esse fluxo administrativo pelo OAuth Device Flow:
+
+1. no Google Cloud, habilite **YouTube Data API v3**, configure a tela de consentimento
+   e adicione sua conta como usuário de teste enquanto o app estiver em testes;
+2. crie um OAuth Client do tipo **TVs and Limited Input devices**;
+3. informe Client ID e Client Secret no CasCam e toque **Autorizar YouTube**;
+4. conclua o código mostrado pelo app na página Google aberta no navegador;
+5. escolha título, privacidade, protocolo e toque **Criar live e transmitir**.
+
+O app cria `liveBroadcast` com início/parada automáticos, cria `liveStream`, faz o
+`bind`, recebe endereço/chave de ingestão e começa a transmissão. Tokens e segredo
+ficam nas preferências privadas sem backup; antes de distribuição pública deverão ser
+migrados para armazenamento criptografado pelo Android Keystore.
 
 ### Tela apagada e economia de dados
 
 Durante a transmissão, um foreground service de câmera/microfone mantém uma
 notificação persistente e um `PARTIAL_WAKE_LOCK`. A composição exporta frames quando
 as análises de câmera chegam, sem depender do redesenho da tela; portanto o botão de
-energia pode apagar o display sem encerrar câmera, encoder ou upload. Encerrar pela
+energia pode apagar o display sem encerrar câmera, encoder ou upload. O app não usa
+mais `FLAG_KEEP_SCREEN_ON`, então o timeout normal do Android também apaga a tela
+sozinho enquanto a live continua. Encerrar pela
 notificação ainda será acrescentado em uma etapa posterior.
 
 O seletor de bitrate oferece 250 kbps, 500 kbps, 1,5 Mbps e 3 Mbps. No modo

@@ -37,6 +37,17 @@
                     <EditText android:id="@+id/youtube_server" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:textColor="#FFFFFF" android:singleLine="true" />
                     <TextView style="@style/PanelLabel" android:text="Chave da transmissão" />
                     <EditText android:id="@+id/youtube_key" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="xxxx-xxxx-xxxx-xxxx" android:inputType="textPassword" android:textColor="#FFFFFF" android:textColorHint="#718191" android:singleLine="true" />
+                    <TextView style="@style/PanelLabel" android:text="OAuth Client ID do Google Cloud" />
+                    <EditText android:id="@+id/youtube_client_id" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="…apps.googleusercontent.com" android:inputType="text" android:textColor="#FFFFFF" android:textColorHint="#718191" android:singleLine="true" />
+                    <TextView style="@style/PanelLabel" android:text="OAuth Client Secret (cliente para TV)" />
+                    <EditText android:id="@+id/youtube_client_secret" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:textColor="#FFFFFF" android:singleLine="true" />
+                    <TextView style="@style/PanelLabel" android:text="Título da nova live" />
+                    <EditText android:id="@+id/live_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:textColor="#FFFFFF" android:singleLine="true" />
+                    <TextView style="@style/PanelLabel" android:text="Privacidade" />
+                    <Spinner android:id="@+id/live_privacy" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <Button android:id="@+id/authorize_youtube" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="1. AUTORIZAR YOUTUBE" />
+                    <Button android:id="@+id/create_live" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="2. CRIAR LIVE E TRANSMITIR" />
+                    <TextView android:id="@+id/oauth_status" style="@style/PanelHint" android:text="OAuth ainda não configurado." />
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
                     <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />

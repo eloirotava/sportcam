@@ -28,6 +28,12 @@ class BroadcastConfigurationStore(context: Context) {
         youtubeServerUrl = preferences.getString("youtube_server", null)
             ?: "rtmps://a.rtmps.youtube.com/live2",
         youtubeStreamKey = preferences.getString("youtube_key", "").orEmpty(),
+        youtubeOAuthClientId = preferences.getString("youtube_oauth_client_id", "").orEmpty(),
+        youtubeOAuthClientSecret = preferences.getString("youtube_oauth_client_secret", "").orEmpty(),
+        liveTitle = preferences.getString("live_title", "CasCam ao vivo").orEmpty(),
+        livePrivacy = runCatching {
+            LivePrivacy.valueOf(preferences.getString("live_privacy", null).orEmpty())
+        }.getOrDefault(LivePrivacy.UNLISTED),
     )
 
     fun save(configuration: BroadcastConfiguration) {
@@ -45,6 +51,10 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("bitrate_preset", configuration.bitratePreset.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
+            .putString("youtube_oauth_client_id", configuration.youtubeOAuthClientId)
+            .putString("youtube_oauth_client_secret", configuration.youtubeOAuthClientSecret)
+            .putString("live_title", configuration.liveTitle)
+            .putString("live_privacy", configuration.livePrivacy.name)
             .apply()
     }
 

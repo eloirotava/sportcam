@@ -17,6 +17,10 @@ data class BroadcastConfiguration(
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
     val youtubeServerUrl: String = "rtmps://a.rtmps.youtube.com/live2",
     val youtubeStreamKey: String = "",
+    val youtubeOAuthClientId: String = "",
+    val youtubeOAuthClientSecret: String = "",
+    val liveTitle: String = "CasCam ao vivo",
+    val livePrivacy: LivePrivacy = LivePrivacy.UNLISTED,
 )
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
@@ -27,6 +31,9 @@ enum class BitratePreset(val label: String, val bitsPerSecond: Int?) {
     LOW("Baixo · 500 kbps", 500_000),
     MEDIUM("Médio · 1,5 Mbps", 1_500_000),
     HIGH("Alto · 3 Mbps", 3_000_000),
+}
+enum class LivePrivacy(val label: String, val apiValue: String) {
+    UNLISTED("Não listado", "unlisted"), PRIVATE("Privado", "private"), PUBLIC("Público", "public"),
 }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)

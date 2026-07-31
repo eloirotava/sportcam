@@ -4,10 +4,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.Uri
 import android.os.Bundle
 import android.util.Size
 import android.view.View
-import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.SeekBar
@@ -37,6 +37,8 @@ import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.VideoCodec
 import dev.cascam.config.BitratePreset
+import dev.cascam.config.LivePrivacy
+import dev.cascam.youtube.YoutubeLiveApi
 import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
@@ -62,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private val repeatedFrameCount = AtomicInteger()
     private val distinctSourcesConfirmed = AtomicBoolean()
     private var publisher: YoutubePublisher? = null
+    private lateinit var youtubeApi: YoutubeLiveApi
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -71,11 +74,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         broadcastLifecycle.start()
         store = BroadcastConfigurationStore(this)
+        youtubeApi = YoutubeLiveApi(this)
         capabilities = CameraCapabilitiesReader.read(this)
         configureForm(store.load())
         configureActions()
@@ -100,6 +103,12 @@ class MainActivity : AppCompatActivity() {
         binding.videoCodec.isEnabled = configuration.protocol == BroadcastProtocol.HLS
         binding.bitratePreset.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BitratePreset.entries.map { it.label })
         binding.bitratePreset.setSelection(BitratePreset.entries.indexOf(configuration.bitratePreset))
+        binding.livePrivacy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LivePrivacy.entries.map { it.label })
+        binding.livePrivacy.setSelection(LivePrivacy.entries.indexOf(configuration.livePrivacy))
+        binding.youtubeClientId.setText(configuration.youtubeOAuthClientId)
+        binding.youtubeClientSecret.setText(configuration.youtubeOAuthClientSecret)
+        binding.liveTitle.setText(configuration.liveTitle)
+        binding.oauthStatus.text = if (youtubeApi.hasRefreshToken()) "Conta autorizada; pronta para criar lives." else "OAuth ainda não autorizado."
         binding.youtubeServer.setText(configuration.youtubeServerUrl)
         binding.youtubeKey.setText(configuration.youtubeStreamKey)
         binding.compositionOverlay.setCrop(configuration.cropZoom, configuration.cropPanX, configuration.cropPanY)
@@ -115,6 +124,8 @@ class MainActivity : AppCompatActivity() {
         binding.navScoreboard.setOnClickListener { showScreen(Screen.SCOREBOARD) }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { toggleBroadcast() }
+        binding.authorizeYoutube.setOnClickListener { authorizeYoutube() }
+        binding.createLive.setOnClickListener { createLiveAndBroadcast() }
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
@@ -190,10 +201,61 @@ class MainActivity : AppCompatActivity() {
             bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
             youtubeServerUrl = binding.youtubeServer.text.toString().trim().removeSuffix("/"),
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
+            youtubeOAuthClientId = binding.youtubeClientId.text.toString().trim(),
+            youtubeOAuthClientSecret = binding.youtubeClientSecret.text.toString().trim(),
+            liveTitle = binding.liveTitle.text.toString().trim().ifBlank { "CasCam ao vivo" },
+            livePrivacy = LivePrivacy.entries[binding.livePrivacy.selectedItemPosition],
         )
     }
 
     private fun saveConfiguration() = store.save(readForm())
+
+    private fun authorizeYoutube() {
+        val clientId = binding.youtubeClientId.text.toString().trim()
+        val clientSecret = binding.youtubeClientSecret.text.toString().trim()
+        if (clientId.isBlank()) { binding.youtubeClientId.error = "Informe o Client ID OAuth"; return }
+        binding.oauthStatus.text = "Solicitando código ao Google…"
+        Thread {
+            runCatching {
+                val authorization = youtubeApi.beginDeviceAuthorization(clientId)
+                runOnUiThread {
+                    binding.oauthStatus.text = "Código ${authorization.userCode}. Conclua a autorização no navegador…"
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorization.verificationUrl)))
+                }
+                youtubeApi.finishDeviceAuthorization(clientId, clientSecret, authorization) {
+                    runOnUiThread { binding.oauthStatus.text = "Aguardando autorização do código ${authorization.userCode}…" }
+                }
+            }.onSuccess {
+                runOnUiThread { binding.oauthStatus.text = "Conta do YouTube autorizada."; saveConfiguration() }
+            }.onFailure { error ->
+                runOnUiThread { binding.oauthStatus.text = "Falha OAuth: ${error.message}" }
+            }
+        }.start()
+    }
+
+    private fun createLiveAndBroadcast() {
+        val configuration = readForm()
+        if (configuration.youtubeOAuthClientId.isBlank()) { binding.youtubeClientId.error = "Informe e autorize o Client ID"; return }
+        binding.oauthStatus.text = "Criando e vinculando a live no YouTube…"
+        Thread {
+            runCatching {
+                youtubeApi.createAndBindBroadcast(
+                    configuration.youtubeOAuthClientId, configuration.youtubeOAuthClientSecret, configuration.liveTitle,
+                    configuration.livePrivacy.apiValue, configuration.protocol,
+                )
+            }.onSuccess { ingestion ->
+                runOnUiThread {
+                    val server = if (configuration.protocol == BroadcastProtocol.RTMPS) {
+                        ingestion.serverUrl.replace("rtmp://a.rtmp.youtube.com", "rtmps://a.rtmps.youtube.com")
+                    } else ingestion.serverUrl
+                    binding.youtubeServer.setText(server)
+                    binding.youtubeKey.setText(ingestion.streamKey)
+                    binding.oauthStatus.text = "Live criada e vinculada. Iniciando envio…"
+                    saveConfiguration(); toggleBroadcast()
+                }
+            }.onFailure { error -> runOnUiThread { binding.oauthStatus.text = "Falha ao criar live: ${error.message}" } }
+        }.start()
+    }
 
     private fun resetCourtTransform() {
         binding.preview.scaleX = 1f; binding.preview.scaleY = 1f
