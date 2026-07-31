@@ -1,6 +1,8 @@
 package dev.cascam
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private val distinctSourcesConfirmed = AtomicBoolean()
     private var publisher: YoutubePublisher? = null
     private lateinit var youtubeApi: YoutubeLiveApi
+    private var deviceAuthorization: YoutubeLiveApi.DeviceAuthorization? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -125,6 +128,12 @@ class MainActivity : AppCompatActivity() {
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { toggleBroadcast() }
         binding.authorizeYoutube.setOnClickListener { authorizeYoutube() }
+        binding.copyOauthCode.setOnClickListener {
+            val code = deviceAuthorization?.userCode
+            if (code == null) toast("Toque em AUTORIZAR YOUTUBE para gerar um código")
+            else if (copyDeviceCode()) toast("Código $code copiado") else toast("Não consegui copiar; selecione o código na tela")
+        }
+        binding.openOauthPage.setOnClickListener { openVerificationPage() }
         binding.createLive.setOnClickListener { createLiveAndBroadcast() }
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
@@ -215,22 +224,51 @@ class MainActivity : AppCompatActivity() {
         val clientSecret = binding.youtubeClientSecret.text.toString().trim()
         if (clientId.isBlank()) { binding.youtubeClientId.error = "Informe o Client ID OAuth"; return }
         binding.oauthStatus.text = "Solicitando código ao Google…"
+        binding.oauthCodeCard.visibility = View.GONE
+        deviceAuthorization = null
         Thread {
             runCatching {
                 val authorization = youtubeApi.beginDeviceAuthorization(clientId)
-                runOnUiThread {
-                    binding.oauthStatus.text = "Código ${authorization.userCode}. Conclua a autorização no navegador…"
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorization.verificationUrl)))
-                }
+                runOnUiThread { showDeviceCode(authorization); openVerificationPage() }
                 youtubeApi.finishDeviceAuthorization(clientId, clientSecret, authorization) {
-                    runOnUiThread { binding.oauthStatus.text = "Aguardando autorização do código ${authorization.userCode}…" }
+                    runOnUiThread { binding.oauthStatus.text = "Aguardando a confirmação do código ${authorization.userCode} no navegador…" }
                 }
             }.onSuccess {
-                runOnUiThread { binding.oauthStatus.text = "Conta do YouTube autorizada."; saveConfiguration() }
+                runOnUiThread {
+                    deviceAuthorization = null
+                    binding.oauthCodeCard.visibility = View.GONE
+                    binding.oauthStatus.text = "Conta do YouTube autorizada."
+                    saveConfiguration()
+                }
             }.onFailure { error ->
                 runOnUiThread { binding.oauthStatus.text = "Falha OAuth: ${error.message}" }
             }
         }.start()
+    }
+
+    /** Mostra o código na tela e já o deixa na área de transferência, antes de abrir o navegador. */
+    private fun showDeviceCode(authorization: YoutubeLiveApi.DeviceAuthorization) {
+        deviceAuthorization = authorization
+        binding.oauthCode.text = authorization.userCode
+        binding.oauthCodeCard.visibility = View.VISIBLE
+        binding.oauthStatus.text = if (copyDeviceCode()) {
+            toast("Código ${authorization.userCode} copiado")
+            "Código ${authorization.userCode} copiado. Cole na página do Google e confirme."
+        } else {
+            "Código ${authorization.userCode}. Toque em COPIAR CÓDIGO e cole na página do Google."
+        }
+    }
+
+    private fun copyDeviceCode(): Boolean {
+        val code = deviceAuthorization?.userCode ?: return false
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return false
+        return runCatching { clipboard.setPrimaryClip(ClipData.newPlainText("Código YouTube", code)) }.isSuccess
+    }
+
+    private fun openVerificationPage() {
+        val authorization = deviceAuthorization ?: return
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorization.bestVerificationUrl))) }
+            .onFailure { toast("Abra ${authorization.verificationUrl} e cole o código") }
     }
 
     private fun createLiveAndBroadcast() {

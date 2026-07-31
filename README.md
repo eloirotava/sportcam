@@ -130,7 +130,10 @@ OAuth. O app agora implementa esse fluxo administrativo pelo OAuth Device Flow:
    e adicione sua conta como usuário de teste enquanto o app estiver em testes;
 2. crie um OAuth Client do tipo **TVs and Limited Input devices**;
 3. informe Client ID e Client Secret no CasCam e toque **Autorizar YouTube**;
-4. conclua o código mostrado pelo app na página Google aberta no navegador;
+4. ao tocar **Autorizar YouTube** o app copia o código do dispositivo para a área de
+   transferência e abre a página do Google; basta colar. O código também fica visível
+   em fonte grande e selecionável no painel, com os botões **Copiar código** (recopia a
+   qualquer momento, útil depois de voltar do navegador) e **Abrir página**;
 5. escolha título, privacidade, protocolo e toque **Criar live e transmitir**.
 
 O app cria `liveBroadcast` com início/parada automáticos, cria `liveStream`, faz o

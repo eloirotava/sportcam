@@ -46,6 +46,15 @@
                     <TextView style="@style/PanelLabel" android:text="Privacidade" />
                     <Spinner android:id="@+id/live_privacy" android:layout_width="match_parent" android:layout_height="48dp" />
                     <Button android:id="@+id/authorize_youtube" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="1. AUTORIZAR YOUTUBE" />
+                    <LinearLayout android:id="@+id/oauth_code_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                        android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">
+                        <TextView style="@style/PanelLabel" android:layout_marginTop="0dp" android:text="Código do dispositivo (copiado para a área de transferência)" />
+                        <TextView android:id="@+id/oauth_code" style="@style/OauthCode" android:text="—" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                            <Button android:id="@+id/copy_oauth_code" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="COPIAR CÓDIGO" />
+                            <Button android:id="@+id/open_oauth_page" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="ABRIR PÁGINA" />
+                        </LinearLayout>
+                    </LinearLayout>
                     <Button android:id="@+id/create_live" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="2. CRIAR LIVE E TRANSMITIR" />
                     <TextView android:id="@+id/oauth_status" style="@style/PanelHint" android:text="OAuth ainda não configurado." />
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />

@@ -9,7 +9,14 @@ import java.net.URLEncoder
 import java.time.Instant
 
 class YoutubeLiveApi(context: Context) {
-    data class DeviceAuthorization(val deviceCode: String, val userCode: String, val verificationUrl: String, val intervalSeconds: Int, val expiresInSeconds: Int)
+    data class DeviceAuthorization(
+        val deviceCode: String, val userCode: String, val verificationUrl: String,
+        val verificationUrlComplete: String, val intervalSeconds: Int, val expiresInSeconds: Int,
+    ) {
+        /** URL que já leva o código embutido quando o Google devolve essa variante. */
+        val bestVerificationUrl: String get() = verificationUrlComplete.ifBlank { verificationUrl }
+    }
+
     data class Ingestion(val serverUrl: String, val streamKey: String)
 
     private val preferences = context.getSharedPreferences("youtube_oauth", Context.MODE_PRIVATE)
@@ -22,6 +29,7 @@ class YoutubeLiveApi(context: Context) {
         return DeviceAuthorization(
             response.getString("device_code"), response.getString("user_code"),
             response.optString("verification_url", response.optString("verification_uri")),
+            response.optString("verification_url_complete", response.optString("verification_uri_complete")),
             response.optInt("interval", 5), response.getInt("expires_in"),
         )
     }
