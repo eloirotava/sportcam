@@ -159,13 +159,24 @@ class RtmpClient(serverUrl: String, private val streamKey: String) : AutoCloseab
 
     private object Amf0 {
         fun encode(values: List<Any?>): ByteArray = ByteArrayOutputStream().also { output -> values.forEach { write(output, it) } }.toByteArray()
-        private fun write(out: ByteArrayOutputStream, value: Any?) = when (value) {
-            null -> out.write(5)
-            is String -> { out.write(2); out.write(shortBytes(value.toByteArray().size)); out.write(value.toByteArray()) }
-            is Number -> { out.write(0); DataOutputStream(out).writeDouble(value.toDouble()) }
-            is Boolean -> { out.write(1); out.write(if (value) 1 else 0) }
-            is Map<*, *> -> { out.write(3); value.forEach { (key, item) -> out.write(shortBytes(key.toString().toByteArray().size)); out.write(key.toString().toByteArray()); write(out, item) }; out.write(byteArrayOf(0, 0, 9)) }
-            else -> error("Tipo AMF não suportado")
+        private fun write(out: ByteArrayOutputStream, value: Any?): Unit {
+            when (value) {
+                null -> out.write(5)
+                is String -> { out.write(2); out.write(shortBytes(value.toByteArray().size)); out.write(value.toByteArray()) }
+                is Number -> { out.write(0); DataOutputStream(out).writeDouble(value.toDouble()) }
+                is Boolean -> { out.write(1); out.write(if (value) 1 else 0) }
+                is Map<*, *> -> {
+                    out.write(3)
+                    value.forEach { (key, item) ->
+                        val encodedKey = key.toString().toByteArray()
+                        out.write(shortBytes(encodedKey.size))
+                        out.write(encodedKey)
+                        write(out, item)
+                    }
+                    out.write(byteArrayOf(0, 0, 9))
+                }
+                else -> error("Tipo AMF não suportado")
+            }
         }
         fun decode(bytes: ByteArray): List<Any?> {
             var offset = 0
