@@ -46,6 +46,7 @@
                     <EditText android:id="@+id/live_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:textColor="#FFFFFF" android:singleLine="true" />
                     <TextView style="@style/PanelLabel" android:text="Privacidade" />
                     <Spinner android:id="@+id/live_privacy" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelHint" android:text="Não listada abre só por link direto e não aparece na página do canal. Escolha Público para a live ser vista por quem entra no seu canal." />
                     <Button android:id="@+id/authorize_youtube" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="1. AUTORIZAR YOUTUBE" />
                     <LinearLayout android:id="@+id/oauth_code_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
                         android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">
@@ -58,6 +59,16 @@
                     </LinearLayout>
                     <Button android:id="@+id/create_live" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="2. CRIAR LIVE E TRANSMITIR" />
                     <TextView android:id="@+id/oauth_status" style="@style/PanelHint" android:text="OAuth ainda não configurado." />
+                    <LinearLayout android:id="@+id/live_link_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                        android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">
+                        <TextView style="@style/PanelLabel" android:layout_marginTop="0dp" android:text="Endereço desta live" />
+                        <TextView android:id="@+id/live_link" style="@style/PanelText" android:textIsSelectable="true" android:textColor="#73E2A7" android:text="—" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                            <Button android:id="@+id/open_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="ABRIR" />
+                            <Button android:id="@+id/check_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="VER STATUS" />
+                        </LinearLayout>
+                        <TextView android:id="@+id/live_health" style="@style/PanelHint" android:text="Toque em Ver status para saber por que ela ainda não apareceu." />
+                    </LinearLayout>
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
                     <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />

@@ -91,16 +91,31 @@ verdade** e só considera aprovado o par que entregar frames dos dois lados com 
 comprovadamente diferentes — há HAL que aceita o binding e devolve o mesmo buffer nos
 dois fluxos, o que passaria por sucesso em qualquer teste que só olhasse exceções.
 
-Os candidatos são testados nesta ordem:
+A varredura tem duas fases, porque as duas perguntas têm APIs diferentes:
 
-1. **dois sensores físicos da mesma câmera lógica** (`0/2` + `0/3`, por exemplo). É o
-   caminho que interessa para quadra + placar, porque ultra-wide e teleobjetiva quase
-   sempre moram sob a mesma câmera lógica traseira;
-2. **câmera lógica + um sensor físico dela** — alguns HAL recusam o par físico puro e
-   aceitam esta combinação;
-3. **pares lógicos declarados como simultâneos**, que na prática costumam ser apenas
-   traseira + frontal e por isso ficam por último: o placar está atrás do aparelho,
-   junto com a quadra.
+1. **Camera2 direto**, para dois sensores físicos da mesma câmera lógica (`0/2` + `0/6`).
+   É o par que interessa para quadra + placar, já que ultra-wide e teleobjetiva moram sob
+   a mesma lógica traseira, e é a única via com garantia documentada: abrir a câmera
+   **lógica**, criar **uma** sessão e trocar um stream YUV dela por dois streams de mesmo
+   formato e **mesmo tamanho**, cada um amarrado a um sensor por
+   `OutputConfiguration.setPhysicalCameraId`. Os tamanhos testados são os que existem nos
+   dois sensores ao mesmo tempo — pedir um tamanho que só um deles oferece reprova o par
+   por detalhe de tabela, não por limite real;
+2. **CameraX**, para pares de câmeras lógicas em modo simultâneo — na prática traseira +
+   frontal, que é o que o CameraX de fato suporta.
+
+A divisão não é preciosismo. `Camera2Interop.Extender.setPhysicalCameraId` num
+`ImageAnalysis` pode ser silenciosamente ignorado: os dois use cases recebem o mesmo
+stream da câmera lógica e o teste vê dois fluxos idênticos que passariam por "funcionou"
+em qualquer verificação que só olhasse exceções. A documentação do framework é explícita
+em que passar disso exige "per-device testing and tuning using trial and error".
+
+A comparação entre os dois fluxos usa um hash perceptual do plano Y, e **só compara
+quadros com contraste**: uma imagem chapada — sensor ainda escuro logo depois de abrir,
+lente tampada, parede lisa — produz a mesma assinatura degenerada em qualquer câmera, e
+comparar dois quadros chapados dava distância zero, fazendo câmeras distintas parecerem a
+mesma fonte. O veredito usa a mediana das distâncias válidas, não o mínimo, e quando não
+sobra nenhuma comparação válida o relatório diz isso em vez de reprovar o par.
 
 Cada par é varrido de 1920x1080 para 1280x720 e depois 640x480, parando na primeira
 resolução que funciona — é assim que o relatório responde se resolução importa e qual é

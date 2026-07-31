@@ -18,7 +18,59 @@ class YoutubeLiveApi(context: Context) {
         val bestVerificationUrl: String get() = verificationUrlComplete.ifBlank { verificationUrl }
     }
 
-    data class Ingestion(val serverUrl: String, val streamKey: String)
+    data class Ingestion(val serverUrl: String, val streamKey: String, val broadcastId: String, val streamId: String) {
+        val watchUrl: String get() = "https://www.youtube.com/watch?v=$broadcastId"
+    }
+
+    data class BroadcastHealth(
+        val lifeCycleStatus: String,
+        val privacyStatus: String,
+        val streamStatus: String,
+        val healthStatus: String,
+    ) {
+        /** Traduz os quatro campos no que falta fazer para a live aparecer na página do canal. */
+        val summary: String get() = buildString {
+            append("Live: ").append(lifeCycleAsText).append(" · privacidade: ").append(privacyAsText)
+            append("\nIngestão: ").append(streamStatusAsText)
+            if (healthStatus.isNotBlank()) append(" · qualidade: ").append(healthStatus)
+            when {
+                streamStatus == "inactive" -> append("\nO YouTube ainda não recebeu vídeo. A live só entra no ar depois que os dados chegarem.")
+                lifeCycleStatus == "ready" || lifeCycleStatus == "testing" ->
+                    append("\nO vídeo está chegando, mas a transmissão ainda não foi ao ar.")
+                lifeCycleStatus == "live" && privacyStatus == "unlisted" ->
+                    append("\nEstá no ar, porém não listada: só abre por link direto e não aparece na página do canal. Escolha Público antes de criar a live para ela aparecer.")
+                lifeCycleStatus == "live" && privacyStatus == "private" ->
+                    append("\nEstá no ar, porém privada: só você consegue assistir.")
+                lifeCycleStatus == "live" -> append("\nNo ar e pública.")
+                lifeCycleStatus == "complete" -> append("\nJá encerrada.")
+            }
+        }
+
+        private val lifeCycleAsText get() = when (lifeCycleStatus) {
+            "created" -> "criada, sem stream vinculado"
+            "ready" -> "pronta, esperando vídeo"
+            "testing" -> "em teste"
+            "live" -> "no ar"
+            "complete" -> "encerrada"
+            "revoked" -> "removida pelo YouTube"
+            else -> lifeCycleStatus.ifBlank { "desconhecida" }
+        }
+
+        private val privacyAsText get() = when (privacyStatus) {
+            "public" -> "pública"
+            "unlisted" -> "não listada"
+            "private" -> "privada"
+            else -> privacyStatus.ifBlank { "?" }
+        }
+
+        private val streamStatusAsText get() = when (streamStatus) {
+            "active" -> "recebendo vídeo"
+            "inactive" -> "sem vídeo chegando"
+            "ready" -> "pronta, sem vídeo ainda"
+            "error" -> "com erro"
+            else -> streamStatus.ifBlank { "?" }
+        }
+    }
 
     private val preferences = context.getSharedPreferences("youtube_oauth", Context.MODE_PRIVATE)
 
@@ -97,7 +149,22 @@ class YoutubeLiveApi(context: Context) {
             token, JSONObject(),
         )
         val info = stream.getJSONObject("cdn").getJSONObject("ingestionInfo")
-        return Ingestion(info.getString("ingestionAddress"), info.getString("streamName"))
+        return Ingestion(info.getString("ingestionAddress"), info.getString("streamName"), broadcastId, streamId)
+    }
+
+    /** Estado atual da live e da ingestão, que é o que diz por que ela ainda não apareceu no canal. */
+    fun broadcastHealth(clientId: String, clientSecret: String, ingestion: Ingestion): BroadcastHealth {
+        val token = accessToken(clientId, clientSecret)
+        val broadcast = getJson("https://www.googleapis.com/youtube/v3/liveBroadcasts?part=status&id=${encode(ingestion.broadcastId)}", token)
+            .optJSONArray("items")?.optJSONObject(0)?.optJSONObject("status")
+        val stream = getJson("https://www.googleapis.com/youtube/v3/liveStreams?part=status&id=${encode(ingestion.streamId)}", token)
+            .optJSONArray("items")?.optJSONObject(0)?.optJSONObject("status")
+        return BroadcastHealth(
+            lifeCycleStatus = broadcast?.optString("lifeCycleStatus").orEmpty(),
+            privacyStatus = broadcast?.optString("privacyStatus").orEmpty(),
+            streamStatus = stream?.optString("streamStatus").orEmpty(),
+            healthStatus = stream?.optJSONObject("healthStatus")?.optString("status").orEmpty(),
+        )
     }
 
     private fun accessToken(clientId: String, clientSecret: String): String {
@@ -117,6 +184,14 @@ class YoutubeLiveApi(context: Context) {
             .also { editor -> response.optString("refresh_token").takeIf(String::isNotBlank)?.let { editor.putString("refresh_token", it) } }
             .apply()
         return access
+    }
+
+    private fun getJson(url: String, token: String): JSONObject {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 20_000; connection.readTimeout = 20_000
+        connection.setRequestProperty("Authorization", "Bearer $token")
+        return response(connection)
     }
 
     private fun requestJson(url: String, token: String, body: JSONObject): JSONObject {

@@ -2,6 +2,7 @@ package dev.cascam.camera
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -23,10 +24,16 @@ import kotlin.math.abs
 /**
  * Descobre empiricamente quais duas câmeras o aparelho entrega ao mesmo tempo.
  *
- * Não confia só no que o Android declara: para cada par candidato ele liga de fato os dois fluxos,
- * espera frames chegarem dos dois lados e compara as imagens para provar que são fontes distintas —
- * há aparelhos que aceitam o bind e devolvem a mesma imagem duplicada. Cada par é varrido da maior
- * para a menor resolução, então o relatório também responde até onde a resolução pode subir.
+ * A varredura tem duas fases, porque as duas perguntas têm APIs diferentes:
+ *
+ * 1. **Camera2 direto** para dois sensores físicos da mesma câmera lógica — ultra-wide + tele,
+ *    que é o par que interessa para quadra + placar. É a única via com garantia documentada:
+ *    uma sessão só, dois streams YUV de mesmo tamanho, cada um amarrado a um sensor físico.
+ * 2. **CameraX** para pares de câmeras lógicas em modo simultâneo, que na prática é traseira +
+ *    frontal e é o caminho que o CameraX de fato suporta.
+ *
+ * Em nenhuma das duas basta o bind não estourar: o par só passa se os dois fluxos entregarem
+ * imagens comprovadamente diferentes, medidas por [LumaSignature] e só em quadros com contraste.
  */
 class DualCameraProbe(
     private val context: Context,
@@ -34,19 +41,13 @@ class DualCameraProbe(
     private val onProgress: (String) -> Unit,
     private val onReport: (String) -> Unit,
 ) {
-    enum class Outcome(val symbol: String) {
-        WORKS("✓"), SAME_IMAGE("≈"), NO_FRAMES("∅"), BIND_FAILED("✗"),
-    }
-
     private enum class Kind(val description: String) {
-        PHYSICAL_PAIR("dois sensores físicos da mesma câmera lógica"),
-        LOGICAL_PLUS_PHYSICAL("câmera lógica + um sensor físico dela"),
-        CONCURRENT_LOGICAL("duas câmeras lógicas em modo simultâneo"),
+        PHYSICAL_PAIR("dois sensores físicos da mesma câmera lógica, via Camera2"),
+        CONCURRENT_LOGICAL("duas câmeras lógicas em modo simultâneo, via CameraX"),
     }
 
     private data class Candidate(val kind: Kind, val first: CameraInfo, val second: CameraInfo) {
         val label: String get() = "${first.id} + ${second.id}"
-        /** Quanto maior, mais diferentes são os enquadramentos — quadra aberta contra placar fechado. */
         val fieldOfViewGap: Float
             get() {
                 val a = first.horizontalFieldOfView ?: return 0f
@@ -55,16 +56,16 @@ class DualCameraProbe(
             }
     }
 
-    private data class Attempt(val size: Size, val outcome: Outcome, val detail: String)
+    private data class Attempt(val size: Size, val approved: Boolean, val detail: String)
 
     private data class Finding(val candidate: Candidate, val attempts: MutableList<Attempt> = mutableListOf()) {
-        val best: Attempt? get() = attempts.firstOrNull { it.outcome == Outcome.WORKS }
+        val best: Attempt? get() = attempts.firstOrNull { it.approved }
         val worked: Boolean get() = best != null
     }
 
     private class Sampler {
         @Volatile var frames = 0
-        @Volatile var signature = 0L
+        @Volatile var last: LumaSignature? = null
         @Volatile var width = 0
         @Volatile var height = 0
         @Volatile var firstFrameAt = 0L
@@ -75,16 +76,23 @@ class DualCameraProbe(
                 val span = lastFrameAt - firstFrameAt
                 return if (frames > 1 && span > 0) (frames - 1) * 1_000f / span else 0f
             }
-        val size: String get() = if (frames == 0) "sem frames" else "${width}x$height"
+        val describe: String get() = if (frames == 0) "sem quadros" else "${width}x$height @ %.0f fps".format(framesPerSecond)
     }
 
-    /** Menor distância já vista entre as duas imagens, por tentativa — zero significa fonte duplicada. */
+    /** Distâncias válidas de uma tentativa: só quadros com contraste entram. */
     private class Comparison {
-        @Volatile var minimumDistance = Int.MAX_VALUE
+        private val distances = mutableListOf<Int>()
+
+        @Synchronized fun add(distance: Int) { distances += distance }
+
+        @Synchronized fun median(): Int? = distances.takeIf { it.isNotEmpty() }?.sorted()?.let { it[it.size / 2] }
+
+        @Synchronized fun count(): Int = distances.size
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private val analysisExecutor = Executors.newFixedThreadPool(2)
+    private val camera2Probe = Camera2DualStreamProbe(context.getSystemService(CameraManager::class.java))
     private val findings = mutableListOf<Finding>()
     private var candidates = emptyList<Candidate>()
     private var candidateIndex = 0
@@ -118,8 +126,11 @@ class DualCameraProbe(
                 finish("Não consegui abrir o CameraX neste aparelho.")
                 return@addListener
             }
+            // O Camera2 precisa da câmera livre: se o CameraX ainda estiver segurando a lógica,
+            // o openCamera volta com ERROR_CAMERA_IN_USE e o par honesto seria reprovado à toa.
+            runCatching { provider?.unbindAll() }
             owner = ProbeLifecycleOwner().also { it.start() }
-            runAttempt()
+            handler.postDelayed({ if (isRunning) runAttempt() }, SETTLE_MS)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -131,26 +142,19 @@ class DualCameraProbe(
     fun shutdown() {
         cancel()
         analysisExecutor.shutdown()
+        camera2Probe.close()
     }
 
     // ---------------------------------------------------------------- candidatos
 
     private fun buildCandidates(): List<Candidate> {
         val result = mutableListOf<Candidate>()
-        // 1. Dois sensores físicos da mesma câmera lógica: o caminho natural para ultra-wide + tele.
         capabilities.physicalSensorsByLogical().forEach { (_, sensors) ->
-            sensors.sortedByDescending { it.horizontalFieldOfView ?: 0f }.let { ordered ->
-                for (i in ordered.indices) for (j in i + 1 until ordered.size) {
-                    result += Candidate(Kind.PHYSICAL_PAIR, ordered[i], ordered[j])
-                }
+            val ordered = sensors.sortedByDescending { it.horizontalFieldOfView ?: 0f }
+            for (i in ordered.indices) for (j in i + 1 until ordered.size) {
+                result += Candidate(Kind.PHYSICAL_PAIR, ordered[i], ordered[j])
             }
         }
-        // 2. Fluxo da câmera lógica somado a um sensor físico dela: às vezes o HAL aceita este e recusa o par físico puro.
-        capabilities.physicalSensorsByLogical().forEach { (logicalId, sensors) ->
-            val logical = capabilities.camera(logicalId) ?: return@forEach
-            sensors.forEach { sensor -> result += Candidate(Kind.LOGICAL_PLUS_PHYSICAL, logical, sensor) }
-        }
-        // 3. Pares que o próprio aparelho declara como simultâneos (quase sempre traseira + frontal).
         capabilities.concurrentPairs.forEach { pair ->
             val ordered = pair.sorted().mapNotNull { capabilities.camera(it) }
             for (i in ordered.indices) for (j in i + 1 until ordered.size) {
@@ -163,59 +167,100 @@ class DualCameraProbe(
             .take(MAXIMUM_CANDIDATES)
     }
 
+    private fun resolutionsFor(candidate: Candidate): List<Size> = when (candidate.kind) {
+        // Os dois streams físicos precisam ter exatamente o mesmo tamanho, e o tamanho precisa
+        // existir nos dois sensores; pedir 1920x1080 num sensor que só oferece 1920x1088 reprova
+        // o par por um detalhe de tabela, não por limite real.
+        Kind.PHYSICAL_PAIR -> runCatching {
+            camera2Probe.commonSizes(
+                candidate.first.physicalCameraId.orEmpty(), candidate.second.physicalCameraId.orEmpty(), CEILINGS,
+            )
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: CEILINGS
+        Kind.CONCURRENT_LOGICAL -> CEILINGS
+    }
+
     // ---------------------------------------------------------------- execução
 
     @ExperimentalCamera2Interop
     private fun runAttempt() {
-        val provider = provider ?: return
-        val owner = owner ?: return
         if (candidateIndex >= candidates.size) {
             finish(null)
             return
         }
         val candidate = candidates[candidateIndex]
-        val size = RESOLUTIONS[resolutionIndex]
+        val resolutions = resolutionsFor(candidate)
+        if (resolutionIndex >= resolutions.size) {
+            candidateIndex++
+            resolutionIndex = 0
+            handler.post { if (isRunning) runAttempt() }
+            return
+        }
+        val size = resolutions[resolutionIndex]
         onProgress("Par ${candidateIndex + 1}/${candidates.size}: ${candidate.label} a ${size.width}x${size.height}…")
+        when (candidate.kind) {
+            Kind.PHYSICAL_PAIR -> runCamera2Attempt(candidate, size)
+            Kind.CONCURRENT_LOGICAL -> runCameraXAttempt(candidate, size)
+        }
+    }
 
+    private fun runCamera2Attempt(candidate: Candidate, size: Size) {
+        val token = ++attemptToken
+        camera2Probe.run(
+            logicalId = candidate.first.logicalCameraId,
+            physicalA = candidate.first.physicalCameraId.orEmpty(),
+            physicalB = candidate.second.physicalCameraId.orEmpty(),
+            size = size,
+            observationMs = OBSERVATION_MS,
+        ) { result ->
+            handler.post {
+                if (token != attemptToken || !isRunning) return@post
+                record(candidate, size, result.approved, result.detail)
+                advance()
+            }
+        }
+    }
+
+    @ExperimentalCamera2Interop
+    private fun runCameraXAttempt(candidate: Candidate, size: Size) {
+        val provider = provider ?: return
+        val owner = owner ?: return
         runCatching { provider.unbindAll() }
         val court = Sampler()
         val scoreboard = Sampler()
         val comparison = Comparison()
         val courtAnalysis = CameraXSupport.imageAnalysis(candidate.first, size)
         val scoreboardAnalysis = CameraXSupport.imageAnalysis(candidate.second, size)
-        courtAnalysis.setAnalyzer(analysisExecutor) { image -> sample(court, image) }
+        val start = System.currentTimeMillis()
+        courtAnalysis.setAnalyzer(analysisExecutor) { image -> sample(court, image, start) }
         scoreboardAnalysis.setAnalyzer(analysisExecutor) { image ->
-            sample(scoreboard, image)
-            if (court.frames > 0) {
-                val distance = java.lang.Long.bitCount(court.signature xor scoreboard.signature)
-                if (distance < comparison.minimumDistance) comparison.minimumDistance = distance
+            sample(scoreboard, image, start)
+            val theirs = court.last
+            val ours = scoreboard.last
+            if (theirs != null && ours != null && theirs.hasContrast && ours.hasContrast) {
+                comparison.add(theirs.distanceTo(ours))
             }
         }
 
         val token = ++attemptToken
-        val failure = runCatching { bind(provider, owner, candidate, courtAnalysis, scoreboardAnalysis) }.exceptionOrNull()
+        val failure = runCatching { bindConcurrent(provider, owner, candidate, courtAnalysis, scoreboardAnalysis) }.exceptionOrNull()
         if (failure != null) {
-            record(candidate, size, Outcome.BIND_FAILED, rootCause(failure))
+            record(candidate, size, false, rootCause(failure))
             advance()
             return
         }
         handler.postDelayed({
-            if (token == attemptToken && isRunning) evaluate(candidate, size, court, scoreboard, comparison)
-        }, OBSERVATION_MS)
+            if (token == attemptToken && isRunning) evaluateCameraX(candidate, size, court, scoreboard, comparison)
+        }, WARMUP_MS + OBSERVATION_MS)
     }
 
     @ExperimentalCamera2Interop
-    private fun bind(
+    private fun bindConcurrent(
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
         candidate: Candidate,
         court: ImageAnalysis,
         scoreboard: ImageAnalysis,
     ) {
-        if (candidate.first.logicalCameraId == candidate.second.logicalCameraId) {
-            provider.bindToLifecycle(owner, CameraXSupport.selectorFor(candidate.first.logicalCameraId), court, scoreboard)
-            return
-        }
         val requested = setOf(candidate.first.logicalCameraId, candidate.second.logicalCameraId)
         val group = provider.availableConcurrentCameraInfos.firstOrNull { infos ->
             infos.map { Camera2CameraInfo.from(it).cameraId }.toSet().containsAll(requested)
@@ -234,47 +279,45 @@ class DualCameraProbe(
         ))
     }
 
-    private fun sample(sampler: Sampler, image: ImageProxy) {
+    private fun sample(sampler: Sampler, image: ImageProxy, startedAt: Long) {
         try {
+            if (System.currentTimeMillis() - startedAt < WARMUP_MS) return
             val now = System.currentTimeMillis()
             if (sampler.frames == 0) sampler.firstFrameAt = now
             sampler.lastFrameAt = now
             sampler.width = image.width
             sampler.height = image.height
-            sampler.signature = signatureOf(image)
+            val plane = image.planes[0]
+            sampler.last = LumaSignature.of(plane.buffer, plane.rowStride, plane.pixelStride, image.width, image.height)
             sampler.frames++
         } catch (_: RuntimeException) {
-            // Um frame problemático não invalida o teste; o que conta é o total recebido.
+            // Um quadro problemático não invalida a tentativa; o que conta é o conjunto.
         } finally {
             image.close()
         }
     }
 
-    private fun evaluate(candidate: Candidate, size: Size, court: Sampler, scoreboard: Sampler, comparison: Comparison) {
-        val distance = comparison.minimumDistance
-        val detail = "quadra ${court.size} @ %.0f fps, placar ${scoreboard.size} @ %.0f fps"
-            .format(court.framesPerSecond, scoreboard.framesPerSecond)
+    private fun evaluateCameraX(candidate: Candidate, size: Size, court: Sampler, scoreboard: Sampler, comparison: Comparison) {
+        val detail = "${candidate.first.id} ${court.describe}; ${candidate.second.id} ${scoreboard.describe}"
+        val median = comparison.median()
         when {
-            court.frames == 0 && scoreboard.frames == 0 -> record(candidate, size, Outcome.NO_FRAMES, "nenhum dos dois entregou frames")
-            court.frames == 0 -> record(candidate, size, Outcome.NO_FRAMES, "${candidate.first.id} não entregou frames")
-            scoreboard.frames == 0 -> record(candidate, size, Outcome.NO_FRAMES, "${candidate.second.id} não entregou frames")
-            distance <= DUPLICATE_DISTANCE -> record(candidate, size, Outcome.SAME_IMAGE, "$detail, mas as duas imagens são iguais (distância $distance)")
-            else -> record(candidate, size, Outcome.WORKS, "$detail, imagens distintas (distância $distance)")
+            court.frames == 0 || scoreboard.frames == 0 -> record(candidate, size, false, "$detail — um dos lados não entregou quadro nenhum")
+            median == null -> record(candidate, size, false, "$detail — só chegaram quadros sem contraste; aponte as câmeras para cenas iluminadas e diferentes e repita")
+            median > DISTINCT_DISTANCE -> record(candidate, size, true, "$detail — imagens distintas (distância mediana $median em ${comparison.count()} comparações)")
+            else -> record(candidate, size, false, "$detail — mesma imagem nos dois fluxos (distância mediana $median em ${comparison.count()} comparações)")
         }
         advance()
     }
 
-    private fun record(candidate: Candidate, size: Size, outcome: Outcome, detail: String) {
+    private fun record(candidate: Candidate, size: Size, approved: Boolean, detail: String) {
         val finding = findings.firstOrNull { it.candidate == candidate } ?: Finding(candidate).also { findings += it }
-        finding.attempts += Attempt(size, outcome, detail)
+        finding.attempts += Attempt(size, approved, detail)
     }
 
+    @ExperimentalCamera2Interop
     private fun advance() {
-        val finding = findings.lastOrNull()
-        val last = finding?.attempts?.lastOrNull()?.outcome
-        // Sucesso: já achamos a maior resolução deste par. Imagem duplicada: baixar a resolução não separa as fontes.
-        val stopCandidate = last == Outcome.WORKS || last == Outcome.SAME_IMAGE || resolutionIndex >= RESOLUTIONS.lastIndex
-        if (stopCandidate) {
+        val approved = findings.lastOrNull()?.attempts?.lastOrNull()?.approved == true
+        if (approved) {
             candidateIndex++
             resolutionIndex = 0
         } else {
@@ -284,6 +327,7 @@ class DualCameraProbe(
         handler.postDelayed({ if (isRunning) runAttempt() }, SETTLE_MS)
     }
 
+    @ExperimentalCamera2Interop
     private fun finish(message: String?) {
         attemptToken++
         isRunning = false
@@ -291,8 +335,7 @@ class DualCameraProbe(
         runCatching { provider?.unbindAll() }
         owner?.stop()
         owner = null
-        message?.let(onProgress)
-        if (message == null) onProgress("Teste concluído.")
+        onProgress(message ?: "Teste concluído.")
         onReport(report(finished = message == null))
     }
 
@@ -330,12 +373,12 @@ class DualCameraProbe(
         if (findings.isEmpty()) appendLine("  nada testado ainda")
         findings.forEach { finding ->
             val header = finding.best?.let { "funciona até ${it.size.width}x${it.size.height}" } ?: "não funciona"
-            appendLine("  ${if (finding.worked) Outcome.WORKS.symbol else Outcome.BIND_FAILED.symbol} ${finding.candidate.label} — $header")
+            appendLine("  ${if (finding.worked) "✓" else "✗"} ${finding.candidate.label} — $header")
             appendLine("       ${finding.candidate.kind.description}")
             appendLine("       ${finding.candidate.first.describe}")
             appendLine("       ${finding.candidate.second.describe}")
             finding.attempts.forEach { attempt ->
-                appendLine("       ${attempt.outcome.symbol} ${attempt.size.width}x${attempt.size.height}: ${attempt.detail}")
+                appendLine("       ${if (attempt.approved) "✓" else "✗"} ${attempt.size.width}x${attempt.size.height}: ${attempt.detail}")
             }
         }
         if (!finished) appendLine("  (varredura interrompida antes do fim)")
@@ -346,11 +389,11 @@ class DualCameraProbe(
     }
 
     private fun recommendation(): String {
-        // Um par de sensores físicos da traseira vale mais que traseira + frontal: o placar fica
-        // atrás do aparelho junto com a quadra. Depois disso vale o contraste de enquadramento.
+        // Dois sensores da traseira valem mais que traseira + frontal: o placar está atrás do
+        // aparelho junto com a quadra. Depois disso vale o contraste de enquadramento.
         val winner = findings.filter { it.worked }.maxWithOrNull(
             compareBy<Finding>(
-                { it.candidate.kind != Kind.CONCURRENT_LOGICAL },
+                { it.candidate.kind == Kind.PHYSICAL_PAIR },
                 { it.candidate.fieldOfViewGap },
                 { it.best?.size?.width ?: 0 },
             ),
@@ -363,31 +406,27 @@ class DualCameraProbe(
             return buildString {
                 appendLine("  Use QUADRA = ${court.id} (${court.lensLabel}) e PLACAR = ${scoreboard.id} (${scoreboard.lensLabel}).")
                 appendLine("  Resolução máxima confirmada para os dois fluxos juntos: ${best.size.width}x${best.size.height}.")
-                if (best.size.width < 1920) {
-                    appendLine("  Acima disso o par falhou, então a composição precisa ser montada nessa resolução")
-                    appendLine("  e só depois escalada para a saída da transmissão.")
+                if (winner.candidate.kind == Kind.PHYSICAL_PAIR) {
+                    append("  O par passou pela via Camera2 com os dois streams no mesmo tamanho; a captura da ")
+                    append("transmissão precisa seguir exatamente esse formato, e não o caminho do CameraX.")
+                } else {
+                    append("  Este par usa o modo simultâneo do Android, que costuma travar a resolução por regra da plataforma.")
                 }
-                if (winner.candidate.kind == Kind.CONCURRENT_LOGICAL) {
-                    appendLine("  Este par usa o modo simultâneo do Android, que costuma travar em 720p por regra da própria plataforma.")
-                }
-                append("  O zoom óptico do placar continua vindo do sensor escolhido; ajuste o resto no controle de zoom da aba PLACAR.")
             }
         }
-        val sameImage = findings.any { finding -> finding.attempts.any { it.outcome == Outcome.SAME_IMAGE } }
+        val flat = findings.any { finding -> finding.attempts.any { it.detail.contains("sem contraste") } }
         return buildString {
-            appendLine("  Nenhum par entregou duas imagens distintas neste aparelho.")
-            if (sameImage) {
-                appendLine("  Algum par abriu mas devolveu a mesma imagem nos dois fluxos: o HAL aceitou o pedido")
-                appendLine("  e ignorou o sensor físico, então não dá para confiar nele.")
+            appendLine("  Nenhum par entregou duas imagens distintas neste teste.")
+            if (flat) {
+                appendLine("  Parte das tentativas só recebeu quadros sem contraste, o que não prova nada sobre o aparelho:")
+                appendLine("  aponte as duas lentes para cenas iluminadas e visivelmente diferentes e rode de novo.")
             }
             appendLine("  Caminhos que sobram, em ordem de esforço:")
             appendLine("   a) alternar uma câmera só entre quadra e placar, cortando o placar por zoom digital;")
-            appendLine("   b) usar o zoom da câmera lógica para o placar e aceitar perder o enquadramento aberto durante o corte;")
+            appendLine("   b) usar o zoom da câmera lógica para o placar e aceitar perder o enquadramento aberto no corte;")
             append("   c) um segundo aparelho enviando o placar pela rede.")
         }
     }
-
-    // ---------------------------------------------------------------- utilidades
 
     private fun rootCause(error: Throwable): String {
         val root = generateSequence(error) { it.cause }.last()
@@ -402,32 +441,11 @@ class DualCameraProbe(
     }
 
     companion object {
-        private val RESOLUTIONS = listOf(Size(1920, 1080), Size(1280, 720), Size(640, 480))
+        private val CEILINGS = listOf(Size(1920, 1080), Size(1280, 720), Size(640, 480))
         private const val OBSERVATION_MS = 2_500L
-        private const val SETTLE_MS = 400L
+        private const val WARMUP_MS = 1_200L
+        private const val SETTLE_MS = 600L
         private const val MAXIMUM_CANDIDATES = 10
-        private const val DUPLICATE_DISTANCE = 3
-
-        /**
-         * Hash perceptual de 64 bits lido direto do plano Y, sem converter para bitmap: duas fontes
-         * diferentes dão distâncias altas, o mesmo buffer duplicado dá zero.
-         */
-        fun signatureOf(image: ImageProxy): Long {
-            val plane = image.planes[0]
-            val buffer = plane.buffer
-            val samples = IntArray(64)
-            var average = 0L
-            for (index in samples.indices) {
-                val x = ((index % 8 + .5f) * image.width / 8f).toInt().coerceIn(0, image.width - 1)
-                val y = ((index / 8 + .5f) * image.height / 8f).toInt().coerceIn(0, image.height - 1)
-                val position = y * plane.rowStride + x * plane.pixelStride
-                samples[index] = if (position < buffer.limit()) buffer.get(position).toInt() and 0xff else 0
-                average += samples[index]
-            }
-            average /= samples.size
-            var signature = 0L
-            samples.forEachIndexed { index, value -> if (value >= average) signature = signature or (1L shl index) }
-            return signature
-        }
+        private const val DISTINCT_DISTANCE = 6
     }
 }

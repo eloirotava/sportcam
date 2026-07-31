@@ -70,6 +70,7 @@ class MainActivity : AppCompatActivity() {
     private var deviceAuthorization: YoutubeLiveApi.DeviceAuthorization? = null
     private var probe: DualCameraProbe? = null
     private var probeReport: String = ""
+    private var ingestion: YoutubeLiveApi.Ingestion? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -140,6 +141,11 @@ class MainActivity : AppCompatActivity() {
         }
         binding.openOauthPage.setOnClickListener { openVerificationPage() }
         binding.createLive.setOnClickListener { createLiveAndBroadcast() }
+        binding.openLive.setOnClickListener {
+            val url = ingestion?.watchUrl ?: return@setOnClickListener
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("Abra $url") }
+        }
+        binding.checkLive.setOnClickListener { checkLiveHealth() }
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
@@ -304,13 +310,17 @@ class MainActivity : AppCompatActivity() {
                     configuration.youtubeOAuthClientId, configuration.youtubeOAuthClientSecret, configuration.liveTitle,
                     configuration.livePrivacy.apiValue, configuration.protocol,
                 )
-            }.onSuccess { ingestion ->
+            }.onSuccess { created ->
                 runOnUiThread {
                     val server = if (configuration.protocol == BroadcastProtocol.RTMPS) {
-                        ingestion.serverUrl.replace("rtmp://a.rtmp.youtube.com", "rtmps://a.rtmps.youtube.com")
-                    } else ingestion.serverUrl
+                        created.serverUrl.replace("rtmp://a.rtmp.youtube.com", "rtmps://a.rtmps.youtube.com")
+                    } else created.serverUrl
+                    ingestion = created
                     binding.youtubeServer.setText(server)
-                    binding.youtubeKey.setText(ingestion.streamKey)
+                    binding.youtubeKey.setText(created.streamKey)
+                    binding.liveLink.text = created.watchUrl
+                    binding.liveLinkCard.visibility = View.VISIBLE
+                    binding.liveHealth.text = "Live criada como ${configuration.livePrivacy.label.lowercase()}. Ela só entra no ar depois que o YouTube receber vídeo."
                     binding.oauthStatus.text = "Live criada e vinculada. Iniciando envio…"
                     saveConfiguration(); toggleBroadcast()
                 }
@@ -354,6 +364,21 @@ class MainActivity : AppCompatActivity() {
         if (clipboard == null) { toast("Área de transferência indisponível"); return }
         clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras CasCam", probeReport))
         toast("Relatório copiado")
+    }
+
+    private fun checkLiveHealth() {
+        val created = ingestion ?: return
+        val configuration = readForm()
+        binding.liveHealth.text = "Consultando o YouTube…"
+        Thread {
+            runCatching {
+                youtubeApi.broadcastHealth(configuration.youtubeOAuthClientId, configuration.youtubeOAuthClientSecret, created)
+            }.onSuccess { health ->
+                runOnUiThread { binding.liveHealth.text = health.summary }
+            }.onFailure { error ->
+                runOnUiThread { binding.liveHealth.text = "Não consegui consultar: ${error.message}" }
+            }
+        }.start()
     }
 
     private fun resetCourtTransform() {
