@@ -88,6 +88,26 @@ A primeira linha de `java -version` deve começar com `openjdk version "17`. Os 
 sobre `System::load`/`--enable-native-access` vinham do Gradle rodando no Java 25 e
 não impediam o build por si só; o erro era a versão incompatível da JVM.
 
+O JDK 25 instalado no Codespaces pode continuar existindo e ser usado por outros
+projetos. Não o usamos neste build porque o Gradle 8.11.1/AGP 8.9.1 foi escolhido
+para a toolchain Android do projeto e não consegue rodar no Java 25 — a falha que
+mostra apenas `25.0.2` acontece antes mesmo de compilar o app. O arquivo
+`.cascam-env` coloca `$JAVA_HOME/bin` no início do `PATH`, afetando somente o terminal
+em que ele for carregado.
+
+Se você já gerou `.cascam-env` com uma versão anterior do bootstrap, apague-o e gere
+novamente depois de atualizar o código:
+
+```bash
+rm -f .cascam-env
+./scripts/bootstrap-codespaces.sh
+source .cascam-env
+which java
+java -version
+```
+
+`which java` deve retornar `/usr/lib/jvm/java-17-openjdk-amd64/bin/java`.
+
 Se preferir executar cada etapa manualmente, abra
 `scripts/bootstrap-codespaces.sh`: ele contém os comandos completos, sem esconder a
 instalação em uma imagem ou binário do repositório.

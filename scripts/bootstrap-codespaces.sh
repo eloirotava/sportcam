@@ -48,7 +48,12 @@ if [[ "$($java_home/bin/java -version 2>&1 | head -n 1)" != *'17.'* ]]; then
 fi
 export JAVA_HOME="$java_home"
 export ANDROID_HOME="$android_home"
-export PATH="$gradle_home/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+export PATH="$JAVA_HOME/bin:$gradle_home/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+hash -r
+if [[ "$(java -version 2>&1 | head -n 1)" != *'17.'* ]]; then
+  echo "O comando java ainda não aponta para o JDK 17: $(command -v java)" >&2
+  exit 1
+fi
 
 yes | sdkmanager --licenses >/dev/null || true
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
@@ -56,7 +61,7 @@ printf 'sdk.dir=%s\n' "$ANDROID_HOME" > "$repo_root/local.properties"
 cat > "$repo_root/.cascam-env" <<EOF
 export JAVA_HOME="$JAVA_HOME"
 export ANDROID_HOME="$ANDROID_HOME"
-export PATH="$gradle_home/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH"
+export PATH="\$JAVA_HOME/bin:$gradle_home/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH"
 EOF
 
 # Um daemon iniciado anteriormente com Java 25 não deve ser reaproveitado.
@@ -65,5 +70,5 @@ EOF
 echo
 echo "Ferramentas instaladas fora do repositório. Agora execute:"
 echo "  source .cascam-env"
-echo "  java -version  # deve mostrar 17"
+echo "  java -version  # deve mostrar 17; se mostrar 25, atualize o script no Git"
 echo "  gradle assembleDebug"
