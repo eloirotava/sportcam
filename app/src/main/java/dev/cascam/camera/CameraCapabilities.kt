@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CaptureRequest
 import android.util.Size
 import kotlin.math.atan
 import kotlin.math.max
@@ -36,7 +35,26 @@ data class CameraInfo(
      * vale para a câmera lógica inteira e mexer no placar mexeria também na quadra.
      */
     val perPhysicalZoom: PerPhysicalZoom = PerPhysicalZoom.NONE,
+    /** Chaves que o request aceita sobrescrever por sensor, sem o prefixo `android.`. */
+    val physicalRequestKeys: List<String> = emptyList(),
+    val zoomRatioRange: String? = null,
 ) {
+    /**
+     * Exposição por sensor. Placar de LED estoura quando a medição é feita pela quadra escura, e
+     * placar de parede clara faz o contrário; sem esta chave os dois dividem a mesma exposição.
+     */
+    val independentExposure: Boolean get() =
+        (physicalRequestKeys.contains("sensor.exposureTime") && physicalRequestKeys.contains("sensor.sensitivity")) ||
+            physicalRequestKeys.contains("control.aeExposureCompensation") ||
+            physicalRequestKeys.contains("control.aeRegions")
+
+    val independentFocus: Boolean get() = physicalRequestKeys.any {
+        it == "lens.focusDistance" || it == "control.afMode" || it == "control.afRegions"
+    }
+
+    /** Quanto dá para recortar no sensor antes de começar a esticar pixel, saindo em 1080p. */
+    val losslessCropAt1080p: Float? get() = maximumYuvSize?.let { it.width / 1920f }
+
     val isPhysical: Boolean get() = physicalCameraId != null
 
     val lensLabel: String get() = when {
@@ -52,6 +70,10 @@ data class CameraInfo(
         append(" · ").append(lensLabel)
         minimumFocalLength?.let { append(" · ").append("%.1f mm".format(it)) }
         maximumYuvSize?.let { append(" · YUV máx ").append("${it.width}x${it.height}") }
+        if (isPhysical) losslessCropAt1080p?.takeIf { it > 1.05f }?.let {
+            append(" · crop limpo até ").append("%.1f×".format(it)).append(" em 1080p")
+        }
+        zoomRatioRange?.let { append(" · zoom ").append(it) }
     }
 }
 
@@ -86,11 +108,12 @@ object CameraCapabilitiesReader {
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toList().orEmpty()
             val multiCamera = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
             val level = hardwareLevel(characteristics)
+            val physicalKeys = physicalRequestKeys(characteristics)
             val logical = CameraInfo(
                 id, id, null,
                 characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                 facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), level, multiCamera,
-                perPhysicalZoom(characteristics),
+                perPhysicalZoom(physicalKeys), physicalKeys, zoomRatioRange(characteristics),
             )
             val physical = characteristics.physicalCameraIds.map { physicalId ->
                 val physicalCharacteristics = manager.getCameraCharacteristics(physicalId)
@@ -99,6 +122,7 @@ object CameraCapabilitiesReader {
                     physicalCharacteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                     facing, horizontalFieldOfView(physicalCharacteristics), maximumYuvSize(physicalCharacteristics),
                     hardwareLevel(physicalCharacteristics), false,
+                    PerPhysicalZoom.NONE, emptyList(), zoomRatioRange(physicalCharacteristics),
                 )
             }
             listOf(logical) + physical
@@ -115,14 +139,20 @@ object CameraCapabilitiesReader {
      * Chaves que o HAL aceita sobrescrever por sensor físico dentro do mesmo request. É o que
      * decide se dá para dar zoom só no placar sem arrastar o enquadramento da quadra junto.
      */
-    private fun perPhysicalZoom(characteristics: CameraCharacteristics): PerPhysicalZoom {
-        val keys = runCatching { characteristics.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
-        return when {
-            keys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> PerPhysicalZoom.ZOOM_RATIO
-            keys.contains(CaptureRequest.SCALER_CROP_REGION) -> PerPhysicalZoom.CROP_REGION
-            else -> PerPhysicalZoom.NONE
-        }
+    private fun physicalRequestKeys(characteristics: CameraCharacteristics): List<String> =
+        runCatching { characteristics.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
+            .map { it.name.removePrefix("android.") }
+            .sorted()
+
+    private fun perPhysicalZoom(keys: List<String>): PerPhysicalZoom = when {
+        keys.contains("control.zoomRatio") -> PerPhysicalZoom.ZOOM_RATIO
+        keys.contains("scaler.cropRegion") -> PerPhysicalZoom.CROP_REGION
+        else -> PerPhysicalZoom.NONE
     }
+
+    private fun zoomRatioRange(characteristics: CameraCharacteristics): String? = characteristics
+        .get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+        ?.let { "%.1f×–%.1f×".format(it.lower, it.upper) }
 
     private fun hardwareLevel(characteristics: CameraCharacteristics) =
         when (characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {

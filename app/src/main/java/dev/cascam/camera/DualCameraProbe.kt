@@ -20,6 +20,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.tan
 
 /**
  * Descobre empiricamente quais duas câmeras o aparelho entrega ao mesmo tempo.
@@ -351,9 +352,20 @@ class DualCameraProbe(
         capabilities.cameras.filter { !it.isPhysical }.forEach { logical ->
             appendLine("  [${logical.id}] ${logical.describe}")
             appendLine("       nível ${logical.hardwareLevel}${if (logical.logicalMultiCamera) " · LOGICAL_MULTI_CAMERA" else ""}")
-            if (logical.logicalMultiCamera) appendLine("       zoom independente por sensor: ${logical.perPhysicalZoom.label}")
             capabilities.cameras.filter { it.isPhysical && it.logicalCameraId == logical.id }.forEach {
                 appendLine("       └ ${it.describe}")
+            }
+            if (logical.logicalMultiCamera) {
+                appendLine("       CONTROLES INDEPENDENTES POR SENSOR")
+                appendLine("         zoom: ${logical.perPhysicalZoom.label}")
+                appendLine("         exposição: ${if (logical.independentExposure) "sim" else "não — os dois dividem a mesma medição"}")
+                appendLine("         foco: ${if (logical.independentFocus) "sim" else "não"}")
+                if (logical.physicalRequestKeys.isEmpty()) {
+                    appendLine("         nenhuma chave por sensor declarada")
+                } else {
+                    appendLine("         ${logical.physicalRequestKeys.size} chaves aceitas por sensor:")
+                    wrap(logical.physicalRequestKeys.joinToString(", "), 62).forEach { appendLine("           $it") }
+                }
             }
         }
         appendLine()
@@ -408,8 +420,16 @@ class DualCameraProbe(
                 appendLine("  Use QUADRA = ${court.id} (${court.lensLabel}) e PLACAR = ${scoreboard.id} (${scoreboard.lensLabel}).")
                 appendLine("  Resolução máxima confirmada para os dois fluxos juntos: ${best.size.width}x${best.size.height}.")
                 if (winner.candidate.kind == Kind.PHYSICAL_PAIR) {
-                    append("  O par passou pela via Camera2 com os dois streams no mesmo tamanho; a captura da ")
-                    append("transmissão precisa seguir exatamente esse formato, e não o caminho do CameraX.")
+                    appendLine("  O par passou pela via Camera2 com os dois streams no mesmo tamanho; a captura da")
+                    appendLine("  transmissão segue esse formato, e não o caminho do CameraX.")
+                    appendLine()
+                    appendLine("  ONDE APONTAR O TRIPÉ")
+                    val gap = ratioBetween(court, scoreboard)
+                    appendLine("  As duas lentes olham para o mesmo lado, então ${scoreboard.id} enxerga só o miolo do")
+                    appendLine("  quadro de ${court.id}${gap?.let { " — cerca de %.0f%% da largura".format(it * 100) } ?: ""}.")
+                    appendLine("  Aponte primeiro para o placar e só depois confira se a quadra inteira cabe em volta:")
+                    append("  placar na lateral do quadro aberto fica fora do alcance do outro sensor, e aí não é")
+                    append(" distância, é direção — zoom nenhum resolve.")
                 } else {
                     append("  Este par usa o modo simultâneo do Android, que costuma travar a resolução por regra da plataforma.")
                 }
@@ -427,6 +447,36 @@ class DualCameraProbe(
             appendLine("   b) usar o zoom da câmera lógica para o placar e aceitar perder o enquadramento aberto no corte;")
             append("   c) um segundo aparelho enviando o placar pela rede.")
         }
+    }
+
+    /**
+     * Fração da largura do quadro aberto que o sensor fechado cobre. Compara tangentes de meio
+     * ângulo, não os ângulos: 29° dentro de 104° não é 28% da largura, é bem menos.
+     */
+    private fun ratioBetween(wide: CameraInfo, narrow: CameraInfo): Float? {
+        val wideAngle = wide.horizontalFieldOfView ?: return null
+        val narrowAngle = narrow.horizontalFieldOfView ?: return null
+        if (wideAngle <= 0f || narrowAngle <= 0f) return null
+        val wideHalf = tan(Math.toRadians(wideAngle / 2.0))
+        val narrowHalf = tan(Math.toRadians(narrowAngle / 2.0))
+        if (wideHalf <= 0.0) return null
+        return (narrowHalf / wideHalf).toFloat()
+    }
+
+    /** Quebra uma lista longa em linhas que cabem na largura do painel, sem cortar palavra. */
+    private fun wrap(text: String, width: Int): List<String> {
+        val lines = mutableListOf<String>()
+        var current = StringBuilder()
+        text.split(" ").forEach { word ->
+            if (current.isNotEmpty() && current.length + 1 + word.length > width) {
+                lines += current.toString()
+                current = StringBuilder()
+            }
+            if (current.isNotEmpty()) current.append(' ')
+            current.append(word)
+        }
+        if (current.isNotEmpty()) lines += current.toString()
+        return lines
     }
 
     private fun rootCause(error: Throwable): String {
