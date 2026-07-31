@@ -82,6 +82,33 @@ binding/configuração dos use cases, e não ausência genérica de multicâmera
 físicos internos à mesma câmera lógica continuam sendo outro caso e não devem ser
 confundidos com os pares lógicos concorrentes.
 
+### Aba TESTE: descobrindo empiricamente o que o aparelho aceita
+
+Declaração não é garantia, e nenhuma das quatro condições acima é observável só lendo a
+documentação do aparelho. A aba **TESTE** existe para responder na prática, no aparelho
+que vai transmitir o jogo: ela monta uma lista de pares candidatos, **liga cada par de
+verdade** e só considera aprovado o par que entregar frames dos dois lados com imagens
+comprovadamente diferentes — há HAL que aceita o binding e devolve o mesmo buffer nos
+dois fluxos, o que passaria por sucesso em qualquer teste que só olhasse exceções.
+
+Os candidatos são testados nesta ordem:
+
+1. **dois sensores físicos da mesma câmera lógica** (`0/2` + `0/3`, por exemplo). É o
+   caminho que interessa para quadra + placar, porque ultra-wide e teleobjetiva quase
+   sempre moram sob a mesma câmera lógica traseira;
+2. **câmera lógica + um sensor físico dela** — alguns HAL recusam o par físico puro e
+   aceitam esta combinação;
+3. **pares lógicos declarados como simultâneos**, que na prática costumam ser apenas
+   traseira + frontal e por isso ficam por último: o placar está atrás do aparelho,
+   junto com a quadra.
+
+Cada par é varrido de 1920x1080 para 1280x720 e depois 640x480, parando na primeira
+resolução que funciona — é assim que o relatório responde se resolução importa e qual é
+o teto real do par. O relatório final traz o inventário das lentes com ângulo horizontal
+aproximado, o que o Android declara, o resultado de cada tentativa com fps e distância
+entre as imagens, e uma recomendação de qual câmera usar em cada papel. O botão **Copiar
+relatório** joga tudo na área de transferência.
+
 Referências: [CameraX — câmera concorrente](https://developer.android.com/media/camera/camerax/configuration#concurrent-camera),
 [`CameraManager.getConcurrentCameraIds`](https://developer.android.com/reference/android/hardware/camera2/CameraManager#getConcurrentCameraIds())
 e [Samsung Director's View](https://www.samsung.com/us/support/answer/ANS00088122/).

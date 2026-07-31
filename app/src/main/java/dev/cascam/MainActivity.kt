@@ -8,7 +8,6 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
-import android.util.Size
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -25,8 +24,6 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -35,6 +32,8 @@ import androidx.lifecycle.LifecycleRegistry
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraCapabilitiesReader
 import dev.cascam.camera.CameraInfo
+import dev.cascam.camera.CameraXSupport
+import dev.cascam.camera.DualCameraProbe
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.VideoCodec
@@ -52,7 +51,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
-    private enum class Screen { BROADCAST, COURT, SCOREBOARD }
+    private enum class Screen { BROADCAST, COURT, SCOREBOARD, DIAGNOSTICS }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var capabilities: CameraCapabilities
@@ -68,6 +67,8 @@ class MainActivity : AppCompatActivity() {
     private var publisher: YoutubePublisher? = null
     private lateinit var youtubeApi: YoutubeLiveApi
     private var deviceAuthorization: YoutubeLiveApi.DeviceAuthorization? = null
+    private var probe: DualCameraProbe? = null
+    private var probeReport: String = ""
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -125,6 +126,9 @@ class MainActivity : AppCompatActivity() {
         binding.navBroadcast.setOnClickListener { showScreen(Screen.BROADCAST) }
         binding.navCourt.setOnClickListener { showScreen(Screen.COURT) }
         binding.navScoreboard.setOnClickListener { showScreen(Screen.SCOREBOARD) }
+        binding.navDiagnostics.setOnClickListener { showScreen(Screen.DIAGNOSTICS) }
+        binding.runProbe.setOnClickListener { toggleProbe() }
+        binding.copyProbeReport.setOnClickListener { copyProbeReport() }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { toggleBroadcast() }
         binding.authorizeYoutube.setOnClickListener { authorizeYoutube() }
@@ -173,22 +177,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScreen(target: Screen) {
         if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
+        if (target != Screen.DIAGNOSTICS) stopProbe()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
         binding.panelCourt.visibility = if (target == Screen.COURT) View.VISIBLE else View.GONE
         binding.panelScoreboard.visibility = if (target == Screen.SCOREBOARD) View.VISIBLE else View.GONE
-        binding.compositionOverlay.setMode(when (target) {
+        binding.panelDiagnostics.visibility = if (target == Screen.DIAGNOSTICS) View.VISIBLE else View.GONE
+        when (target) {
             Screen.BROADCAST -> CompositionOverlayView.Mode.COMPOSITION
             Screen.COURT -> CompositionOverlayView.Mode.COURT
             Screen.SCOREBOARD -> CompositionOverlayView.Mode.SCOREBOARD
-        })
+            Screen.DIAGNOSTICS -> null
+        }?.let(binding.compositionOverlay::setMode)
+        binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
         binding.composedOutput.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
-        binding.preview.visibility = if (target == Screen.BROADCAST) View.GONE else View.VISIBLE
+        binding.preview.visibility = if (target == Screen.BROADCAST || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
         binding.scoreboardPreviewContainer.visibility = View.GONE
         resetCourtTransform()
-        if (hasCameraPermission()) {
-            if (target == Screen.BROADCAST) startCompositionPreview() else startCamera(cameraIdFor(target))
+        if (hasCameraPermission()) when (target) {
+            Screen.BROADCAST -> startCompositionPreview()
+            // O teste precisa das câmeras livres: qualquer bind anterior seria confundido com falha do par.
+            Screen.DIAGNOSTICS -> releaseCameras()
+            else -> startCamera(cameraIdFor(target))
         }
+    }
+
+    private fun releaseCameras() {
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({ runCatching { future.get().unbindAll() } }, ContextCompat.getMainExecutor(this))
     }
 
     private fun cameraIdFor(target: Screen): String? = when (target) {
@@ -293,6 +309,44 @@ class MainActivity : AppCompatActivity() {
                 }
             }.onFailure { error -> runOnUiThread { binding.oauthStatus.text = "Falha ao criar live: ${error.message}" } }
         }.start()
+    }
+
+    @ExperimentalCamera2Interop
+    private fun toggleProbe() {
+        if (probe?.isRunning == true) { stopProbe(); return }
+        if (!hasCameraPermission()) { requestCameraIfNeeded(); return }
+        binding.probeReport.text = ""
+        probeReport = ""
+        binding.copyProbeReport.isEnabled = false
+        binding.runProbe.text = "■ PARAR TESTE"
+        probe = DualCameraProbe(
+            context = this,
+            capabilities = capabilities,
+            onProgress = { message -> runOnUiThread { binding.probeStatus.text = message } },
+            onReport = { report ->
+                runOnUiThread {
+                    probeReport = report
+                    binding.probeReport.text = report
+                    binding.copyProbeReport.isEnabled = report.isNotBlank()
+                    binding.runProbe.text = "▶ TESTAR PARES DE CÂMERA"
+                    probe = null
+                }
+            },
+        ).also { it.start() }
+    }
+
+    private fun stopProbe() {
+        probe?.cancel()
+        probe = null
+        binding.runProbe.text = "▶ TESTAR PARES DE CÂMERA"
+    }
+
+    private fun copyProbeReport() {
+        if (probeReport.isBlank()) { toast("Rode o teste primeiro"); return }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        if (clipboard == null) { toast("Área de transferência indisponível"); return }
+        clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras CasCam", probeReport))
+        toast("Relatório copiado")
     }
 
     private fun resetCourtTransform() {
@@ -497,21 +551,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     @ExperimentalCamera2Interop
-    private fun selectorFor(cameraId: String) = CameraSelector.Builder().addCameraFilter { cameras ->
-        cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
-    }.build()
+    private fun selectorFor(cameraId: String) = CameraXSupport.selectorFor(cameraId)
 
     @ExperimentalCamera2Interop
-    private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {
-        val resolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(
-            ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER),
-        ).build()
-        val builder = ImageAnalysis.Builder()
-            .setResolutionSelector(resolutionSelector)
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-        camera.physicalCameraId?.let { Camera2Interop.Extender(builder).setPhysicalCameraId(it) }
-        return builder.build()
-    }
+    private fun imageAnalysis(camera: CameraInfo): ImageAnalysis = CameraXSupport.imageAnalysis(camera)
 
     private fun cameraFor(key: String) = capabilities.cameras.firstOrNull { it.id == key }
 
@@ -548,6 +591,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        probe?.shutdown()
+        probe = null
         stopBroadcast()
         stopService(Intent(this, BroadcastService::class.java))
         broadcastLifecycle.stop()

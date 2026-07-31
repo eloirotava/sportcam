@@ -19,6 +19,7 @@
             <Button android:id="@+id/nav_broadcast" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="AO VIVO" />
             <Button android:id="@+id/nav_court" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="QUADRA" />
             <Button android:id="@+id/nav_scoreboard" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="PLACAR" />
+            <Button android:id="@+id/nav_diagnostics" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="TESTE" />
         </LinearLayout>
         <TextView android:id="@+id/camera_status" style="@style/PanelHint" android:text="Inspecionando câmeras…" />
 
@@ -82,6 +83,15 @@
                     <TextView style="@style/PanelLabel" android:text="Zoom óptico/digital da câmera" />
                     <SeekBar android:id="@+id/scoreboard_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
                     <TextView android:id="@+id/scoreboard_zoom_status" style="@style/PanelHint" android:text="Zoom: 1.0×" />
+                </LinearLayout>
+
+                <LinearLayout android:id="@+id/panel_diagnostics" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                    <TextView style="@style/PanelTitle" android:text="Teste de duas câmeras" />
+                    <TextView style="@style/PanelText" android:text="Liga de verdade cada par possível, confere se os dois fluxos entregam imagens diferentes e desce a resolução até achar a maior que o aparelho aguenta. Aponte as câmeras para cenas distintas antes de começar e deixe a tela ligada." />
+                    <Button android:id="@+id/run_probe" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="▶ TESTAR PARES DE CÂMERA" />
+                    <TextView android:id="@+id/probe_status" style="@style/PanelHint" android:text="Nenhum teste executado ainda." />
+                    <Button android:id="@+id/copy_probe_report" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="COPIAR RELATÓRIO" android:enabled="false" />
+                    <TextView android:id="@+id/probe_report" style="@style/ProbeReport" android:text="O relatório aparece aqui." />
                 </LinearLayout>
             </FrameLayout>
         </ScrollView>
