@@ -51,8 +51,9 @@ class MainActivity : AppCompatActivity() {
     private val distinctSourcesConfirmed = AtomicBoolean()
     private var publisher: YoutubePublisher? = null
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) showScreen(screen) else binding.cameraStatus.text = "Permissão da câmera necessária"
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants[Manifest.permission.CAMERA] == true || hasCameraPermission()) showScreen(screen)
+        else binding.cameraStatus.text = "Permissão da câmera necessária"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -165,6 +166,10 @@ class MainActivity : AppCompatActivity() {
         return when {
             !configuration.youtubeServerUrl.startsWith("rtmps://") -> null.also { binding.youtubeServer.error = "Use uma URL RTMPS" }
             configuration.youtubeStreamKey.isBlank() -> null.also { binding.youtubeKey.error = "Informe a chave do YouTube Studio" }
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> null.also {
+                toast("Autorize o microfone para transmitir com áudio")
+                permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+            }
             else -> configuration
         }
     }
@@ -232,7 +237,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    private fun requestCameraIfNeeded() { if (!hasCameraPermission()) permissionLauncher.launch(Manifest.permission.CAMERA) }
+    private fun requestCameraIfNeeded() {
+        val missing = listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+    }
 
     @ExperimentalCamera2Interop
     private fun startCamera(cameraKey: String?) {

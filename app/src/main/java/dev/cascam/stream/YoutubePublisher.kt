@@ -4,6 +4,9 @@ import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -17,6 +20,7 @@ class YoutubePublisher(
     private val frames = ArrayBlockingQueue<Bitmap>(1)
     private var worker: Thread? = null
     @Volatile private var activeClient: RtmpClient? = null
+    private var audioWorker: Thread? = null
 
     fun start() {
         check(running.compareAndSet(false, true))
@@ -34,20 +38,24 @@ class YoutubePublisher(
         var rtmp: RtmpClient? = null
         try {
             onStatus("Conectando ao YouTube por RTMPS…")
-            rtmp = RtmpClient(serverUrl, streamKey).also { activeClient = it; it.connect() }
+            val connectedRtmp = RtmpClient(serverUrl, streamKey).also { activeClient = it; it.connect() }
+            rtmp = connectedRtmp
+            connectedRtmp.sendMetadata(WIDTH, HEIGHT, FPS, VIDEO_BITRATE)
             codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, WIDTH, HEIGHT).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-                setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
+                setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_BITRATE)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
             }
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
-            onStatus("● AO VIVO · 1280×720 · ${FPS} fps · 3 Mbps")
             val startedAt = System.nanoTime()
+            audioWorker = Thread({ publishAudio(connectedRtmp, startedAt) }, "cascam-audio").also { it.start() }
+            onStatus("Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
             val info = MediaCodec.BufferInfo()
             var sentConfig = false
+            var sentFrames = 0
             while (running.get()) {
                 frames.poll()?.let { bitmap ->
                     val index = codec.dequeueInputBuffer(5_000)
@@ -62,14 +70,23 @@ class YoutubePublisher(
                     val index = codec.dequeueOutputBuffer(info, 0)
                     if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val output = codec.outputFormat
-                        val sps = stripStartCode(output.getByteBuffer("csd-0")!!.toByteArray())
-                        val pps = stripStartCode(output.getByteBuffer("csd-1")!!.toByteArray())
-                        rtmp.sendAvcSequenceHeader(sps, pps); sentConfig = true
+                        val units = listOfNotNull(output.getByteBuffer("csd-0"), output.getByteBuffer("csd-1"))
+                            .flatMap { splitNals(it.toByteArray()) }
+                            .map(::stripStartCode)
+                        val sps = units.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1f) == 7 }
+                            ?: error("Encoder H.264 não forneceu SPS")
+                        val pps = units.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1f) == 8 }
+                            ?: error("Encoder H.264 não forneceu PPS")
+                        connectedRtmp.sendAvcSequenceHeader(sps, pps); sentConfig = true
                     } else if (index >= 0) {
                         if (sentConfig && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val data = ByteArray(info.size)
                             codec.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size); get(data) }
-                            rtmp.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
+                            connectedRtmp.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
+                            sentFrames++
+                            if (sentFrames == 1 || sentFrames % 150 == 0) {
+                                onStatus("● ENVIANDO · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
+                            }
                         }
                         codec.releaseOutputBuffer(index, false)
                     } else break
@@ -80,6 +97,7 @@ class YoutubePublisher(
             if (running.getAndSet(false)) onStatus("Falha na transmissão: ${error.message ?: error.javaClass.simpleName}")
         } finally {
             frames.forEach(Bitmap::recycle); frames.clear()
+            audioWorker?.join(1_000); audioWorker = null
             runCatching { codec?.stop() }; runCatching { codec?.release() }; rtmp?.close(); activeClient = null
         }
     }
@@ -118,6 +136,58 @@ class YoutubePublisher(
         output.flip()
     }
 
+    private fun publishAudio(rtmp: RtmpClient, startedAt: Long) {
+        var codec: MediaCodec? = null
+        var recorder: AudioRecord? = null
+        try {
+            val minimum = AudioRecord.getMinBufferSize(AUDIO_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            recorder = AudioRecord(
+                MediaRecorder.AudioSource.CAMCORDER, AUDIO_RATE, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum, 8_192),
+            )
+            check(recorder.state == AudioRecord.STATE_INITIALIZED) { "Microfone não pôde ser inicializado" }
+            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            codec.configure(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, AUDIO_RATE, 1).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 8_192)
+            }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start(); recorder.startRecording()
+            val info = MediaCodec.BufferInfo()
+            val pcm = ByteArray(8_192)
+            var sentConfig = false
+            while (running.get()) {
+                val inputIndex = codec.dequeueInputBuffer(10_000)
+                if (inputIndex >= 0) {
+                    val count = recorder.read(pcm, 0, pcm.size)
+                    if (count > 0) {
+                        codec.getInputBuffer(inputIndex)!!.apply { clear(); put(pcm, 0, count) }
+                        codec.queueInputBuffer(inputIndex, 0, count, (System.nanoTime() - startedAt) / 1_000, 0)
+                    }
+                }
+                while (true) {
+                    val outputIndex = codec.dequeueOutputBuffer(info, 0)
+                    if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val config = codec.outputFormat.getByteBuffer("csd-0")?.toByteArray() ?: byteArrayOf(0x12, 0x08)
+                        rtmp.sendAacSequenceHeader(config); sentConfig = true
+                    } else if (outputIndex >= 0) {
+                        if (sentConfig && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            val data = ByteArray(info.size)
+                            codec.getOutputBuffer(outputIndex)!!.apply { position(info.offset); limit(info.offset + info.size); get(data) }
+                            rtmp.sendAudio(data, (info.presentationTimeUs / 1_000).toInt())
+                        }
+                        codec.releaseOutputBuffer(outputIndex, false)
+                    } else break
+                }
+            }
+        } catch (error: Exception) {
+            if (running.getAndSet(false)) onStatus("Falha no áudio: ${error.message ?: error.javaClass.simpleName}")
+        } finally {
+            runCatching { recorder?.stop() }; recorder?.release()
+            runCatching { codec?.stop() }; codec?.release()
+        }
+    }
+
     private fun ByteBuffer.toByteArray() = duplicate().let { buffer -> ByteArray(buffer.remaining()).also(buffer::get) }
     private fun stripStartCode(data: ByteArray): ByteArray = when {
         data.size >= 4 && data.sliceArray(0..3).contentEquals(byteArrayOf(0, 0, 0, 1)) -> data.copyOfRange(4, data.size)
@@ -150,5 +220,11 @@ class YoutubePublisher(
         return starts.mapIndexed { i, (start, prefix) -> data.copyOfRange(start + prefix, starts.getOrNull(i + 1)?.first ?: data.size) }
     }
 
-    companion object { private const val WIDTH = 1280; private const val HEIGHT = 720; private const val FPS = 15 }
+    companion object {
+        private const val WIDTH = 1280
+        private const val HEIGHT = 720
+        private const val FPS = 15
+        private const val VIDEO_BITRATE = 3_000_000
+        private const val AUDIO_RATE = 44_100
+    }
 }

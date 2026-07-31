@@ -32,9 +32,9 @@ movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, ond
 ajustados a área amarela capturada e o retângulo azul de destino, além da câmera e seu
 zoom; e **Ao vivo**, que reúne a composição e os
 dados do YouTube. O botão de play agora codifica a composição em H.264 (720p, 15 fps,
-3 Mbps), empacota os quadros em mensagens de vídeo RTMP e publica por RTMPS no
-servidor e chave configurados. Esta primeira transmissão é somente de vídeo; captura
-e codificação AAC do áudio ainda serão adicionadas. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
+3 Mbps), captura o microfone em AAC mono a 44,1 kHz, empacota áudio e vídeo em
+mensagens RTMP e publica por RTMPS no servidor e chave configurados. Metadados do
+stream e cabeçalhos AVC/AAC são enviados antes da mídia. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
 as duas fontes, converte os frames YUV, faz o crop real da quadra e aplica a homografia
 dos quatro pontos do placar para retificá-lo no PiP, sem os guias de configuração.
 Esta primeira composição é desenhada na CPU para validar o resultado no aparelho; a

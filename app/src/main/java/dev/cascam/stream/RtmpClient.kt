@@ -47,6 +47,25 @@ class RtmpClient(serverUrl: String, private val streamKey: String) : AutoCloseab
         sendMessage(6, 9, publishedStreamId, body)
     }
 
+    fun sendMetadata(width: Int, height: Int, frameRate: Int, videoBitrate: Int) {
+        val payload = Amf0.encode(listOf("@setDataFrame", "onMetaData", mapOf(
+            "width" to width.toDouble(), "height" to height.toDouble(),
+            "framerate" to frameRate.toDouble(), "videodatarate" to videoBitrate / 1_000.0,
+            "videocodecid" to 7.0, "audiocodecid" to 10.0,
+            "audiosamplerate" to 44_100.0, "audiosamplesize" to 16.0, "stereo" to false,
+            "encoder" to "CasCam Android",
+        )))
+        sendMessage(5, 18, publishedStreamId, payload)
+    }
+
+    fun sendAacSequenceHeader(config: ByteArray) {
+        sendMessage(4, 8, publishedStreamId, byteArrayOf(0xae.toByte(), 0) + config)
+    }
+
+    fun sendAudio(data: ByteArray, timestampMs: Int) {
+        sendMessage(4, 8, publishedStreamId, byteArrayOf(0xae.toByte(), 1) + data, timestampMs)
+    }
+
     fun sendVideo(nals: List<ByteArray>, timestampMs: Int, keyFrame: Boolean) {
         val body = ByteArrayOutputStream().apply {
             write(if (keyFrame) 0x17 else 0x27); write(byteArrayOf(1, 0, 0, 0))
