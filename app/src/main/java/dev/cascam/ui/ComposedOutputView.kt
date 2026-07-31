@@ -26,19 +26,24 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         val previous = courtFrame
         courtFrame = bitmap
         previous?.recycle()
+        exportFrameIfNeeded()
         invalidate()
     }
     fun submitScoreboard(bitmap: Bitmap) = post {
         val previous = scoreboardFrame
         scoreboardFrame = bitmap
         previous?.recycle()
+        exportFrameIfNeeded()
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         render(canvas, width, height)
+    }
+
+    private fun exportFrameIfNeeded() {
         val now = System.nanoTime()
-        if (onComposedFrame != null && now - lastExportNanos >= 66_000_000L && width > 0 && height > 0) {
+        if (onComposedFrame != null && now - lastExportNanos >= 66_000_000L) {
             lastExportNanos = now
             val output = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
             render(Canvas(output), output.width, output.height)

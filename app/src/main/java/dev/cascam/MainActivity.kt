@@ -2,6 +2,8 @@ package dev.cascam
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.ConnectivityManager
 import android.os.Bundle
 import android.util.Size
 import android.view.View
@@ -25,12 +27,16 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraCapabilitiesReader
 import dev.cascam.camera.CameraInfo
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.VideoCodec
+import dev.cascam.config.BitratePreset
 import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
@@ -56,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private val repeatedFrameCount = AtomicInteger()
     private val distinctSourcesConfirmed = AtomicBoolean()
     private var publisher: YoutubePublisher? = null
+    private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.CAMERA] == true || hasCameraPermission()) showScreen(screen)
@@ -67,6 +74,7 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        broadcastLifecycle.start()
         store = BroadcastConfigurationStore(this)
         capabilities = CameraCapabilitiesReader.read(this)
         configureForm(store.load())
@@ -90,6 +98,8 @@ class MainActivity : AppCompatActivity() {
         binding.videoCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, VideoCodec.entries.map { it.label })
         binding.videoCodec.setSelection(VideoCodec.entries.indexOf(configuration.videoCodec))
         binding.videoCodec.isEnabled = configuration.protocol == BroadcastProtocol.HLS
+        binding.bitratePreset.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BitratePreset.entries.map { it.label })
+        binding.bitratePreset.setSelection(BitratePreset.entries.indexOf(configuration.bitratePreset))
         binding.youtubeServer.setText(configuration.youtubeServerUrl)
         binding.youtubeKey.setText(configuration.youtubeStreamKey)
         binding.compositionOverlay.setCrop(configuration.cropZoom, configuration.cropPanX, configuration.cropPanY)
@@ -177,6 +187,7 @@ class MainActivity : AppCompatActivity() {
             scoreboardZoom = scoreboardZoom(),
             protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             videoCodec = VideoCodec.entries[binding.videoCodec.selectedItemPosition],
+            bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
             youtubeServerUrl = binding.youtubeServer.text.toString().trim().removeSuffix("/"),
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
         )
@@ -210,8 +221,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val configuration = validatedBroadcast() ?: return
+        val bitrate = configuration.bitratePreset.bitsPerSecond ?: if (
+            getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
+        ) 350_000 else 3_000_000
         store.save(configuration)
-        publisher = YoutubePublisher(configuration.protocol, configuration.videoCodec, configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
+        ContextCompat.startForegroundService(this, Intent(this, BroadcastService::class.java))
+        publisher = YoutubePublisher(configuration.protocol, configuration.videoCodec, bitrate, configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
             runOnUiThread {
                 binding.broadcastStatus.text = status
                 if (status.startsWith("Falha")) {
@@ -219,6 +234,7 @@ class MainActivity : AppCompatActivity() {
                     publisher = null
                     binding.composedOutput.onComposedFrame = null
                     binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
+                    stopService(Intent(this, BroadcastService::class.java))
                     Thread { failedPublisher?.close() }.start()
                 }
             }
@@ -234,6 +250,7 @@ class MainActivity : AppCompatActivity() {
         publisher = null
         binding.composedOutput.onComposedFrame = null
         active.close()
+        stopService(Intent(this, BroadcastService::class.java))
         binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
     }
 
@@ -345,9 +362,9 @@ class MainActivity : AppCompatActivity() {
             try {
                 if (courtInfo.logicalCameraId == scoreboardInfo.logicalCameraId) {
                     boundCamera = if (courtKey == scoreboardKey) {
-                        provider.bindToLifecycle(this, courtSelector, courtAnalysis)
+                        provider.bindToLifecycle(broadcastLifecycle, courtSelector, courtAnalysis)
                     } else {
-                        provider.bindToLifecycle(this, courtSelector, courtAnalysis, scoreboardAnalysis)
+                        provider.bindToLifecycle(broadcastLifecycle, courtSelector, courtAnalysis, scoreboardAnalysis)
                     }
                 } else {
                     val requestedPair = setOf(courtInfo.logicalCameraId, scoreboardInfo.logicalCameraId)
@@ -357,8 +374,8 @@ class MainActivity : AppCompatActivity() {
                     val advertisedCourt = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == courtInfo.logicalCameraId }
                     val advertisedScoreboard = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == scoreboardInfo.logicalCameraId }
                     val configurations = listOf(
-                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedCourt).cameraId), UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
-                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedScoreboard).cameraId), UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedCourt).cameraId), UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), broadcastLifecycle),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedScoreboard).cameraId), UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), broadcastLifecycle),
                     )
                     val concurrent = provider.bindToLifecycle(configurations)
                     boundCamera = concurrent.cameras.getOrNull(1)
@@ -371,7 +388,7 @@ class MainActivity : AppCompatActivity() {
                 applyScoreboardZoom()
             } catch (error: RuntimeException) {
                 provider.unbindAll()
-                boundCamera = provider.bindToLifecycle(this, courtSelector, courtAnalysis)
+                boundCamera = provider.bindToLifecycle(broadcastLifecycle, courtSelector, courtAnalysis)
                 val reason = generateSequence<Throwable>(error) { it.cause }.last()
                     .let { "${it.javaClass.simpleName}: ${it.message}" }
                 binding.broadcastStatus.text = "Incompatível com duas fontes ($sourceDescription): $reason. Somente quadra."
@@ -432,10 +449,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopBroadcast()
+        stopService(Intent(this, BroadcastService::class.java))
+        broadcastLifecycle.stop()
         super.onDestroy()
         courtAnalysisExecutor.shutdown()
         scoreboardAnalysisExecutor.shutdown()
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    private class BroadcastLifecycleOwner : LifecycleOwner {
+        private val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle get() = registry
+        fun start() { registry.currentState = Lifecycle.State.RESUMED }
+        fun stop() { registry.currentState = Lifecycle.State.DESTROYED }
+    }
 }

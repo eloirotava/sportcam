@@ -22,6 +22,9 @@ class BroadcastConfigurationStore(context: Context) {
         videoCodec = runCatching {
             VideoCodec.valueOf(preferences.getString("video_codec", null).orEmpty())
         }.getOrDefault(VideoCodec.H264),
+        bitratePreset = runCatching {
+            BitratePreset.valueOf(preferences.getString("bitrate_preset", null).orEmpty())
+        }.getOrDefault(BitratePreset.AUTO),
         youtubeServerUrl = preferences.getString("youtube_server", null)
             ?: "rtmps://a.rtmps.youtube.com/live2",
         youtubeStreamKey = preferences.getString("youtube_key", "").orEmpty(),
@@ -39,6 +42,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putFloat("scoreboard_zoom", configuration.scoreboardZoom)
             .putString("broadcast_protocol", configuration.protocol.name)
             .putString("video_codec", configuration.videoCodec.name)
+            .putString("bitrate_preset", configuration.bitratePreset.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
             .apply()

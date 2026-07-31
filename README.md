@@ -116,6 +116,29 @@ H.264, pois o transporte FLV implementado não carrega HEVC. A disponibilidade r
 do encoder H.265 ainda depende do aparelho; o Galaxy S22 oferece esse encoder por
 hardware.
 
+### Início automático no YouTube
+
+Para uma transmissão já criada, ative **Início automático** e **Parada automática**
+no YouTube Studio. Assim, o recebimento do primeiro stream válido inicia a live sem
+deixar o Studio aberto. Criar/agendar e iniciar uma live inteiramente pelo APK exige
+login OAuth do Google e chamadas autenticadas à YouTube Live Streaming API
+(`liveBroadcasts`, `liveStreams`, `bind` e `transition`); a chave de ingestão sozinha
+não autoriza essas operações administrativas e não deve ser usada como substituta do
+OAuth.
+
+### Tela apagada e economia de dados
+
+Durante a transmissão, um foreground service de câmera/microfone mantém uma
+notificação persistente e um `PARTIAL_WAKE_LOCK`. A composição exporta frames quando
+as análises de câmera chegam, sem depender do redesenho da tela; portanto o botão de
+energia pode apagar o display sem encerrar câmera, encoder ou upload. Encerrar pela
+notificação ainda será acrescentado em uma etapa posterior.
+
+O seletor de bitrate oferece 250 kbps, 500 kbps, 1,5 Mbps e 3 Mbps. No modo
+**Automático**, redes não tarifadas usam 3 Mbps e redes marcadas como tarifadas
+(normalmente dados móveis) usam 350 kbps. Até 500 kbps, a saída cai automaticamente
+para 640×360 e o AAC para 32 kbps; acima disso usa 1280×720 e AAC a 128 kbps.
+
 Referências: [YouTube — HLS ingestion protocol](https://support.google.com/youtube/answer/10349430)
 e [configurações recomendadas de encoder](https://support.google.com/youtube/answer/2853702).
 

@@ -16,12 +16,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 class YoutubePublisher(
     private val protocol: BroadcastProtocol,
     private val videoCodec: VideoCodec,
+    private val videoBitrate: Int,
     private val serverUrl: String,
     private val streamKey: String,
     private val onStatus: (String) -> Unit,
 ) : AutoCloseable {
     private val running = AtomicBoolean()
     private val frames = ArrayBlockingQueue<Bitmap>(1)
+    private val videoWidth = if (videoBitrate <= 500_000) 640 else 1280
+    private val videoHeight = if (videoBitrate <= 500_000) 360 else 720
     private var worker: Thread? = null
     @Volatile private var activeTransport: MediaTransport? = null
     private var audioWorker: Thread? = null
@@ -33,8 +36,11 @@ class YoutubePublisher(
 
     fun offer(bitmap: Bitmap) {
         if (!running.get()) { bitmap.recycle(); return }
+        val prepared = if (bitmap.width == videoWidth && bitmap.height == videoHeight) bitmap else {
+            Bitmap.createScaledBitmap(bitmap, videoWidth, videoHeight, true).also { bitmap.recycle() }
+        }
         frames.poll()?.recycle()
-        if (!frames.offer(bitmap)) bitmap.recycle()
+        if (!frames.offer(prepared)) prepared.recycle()
     }
 
     private fun publishLoop() {
@@ -47,7 +53,7 @@ class YoutubePublisher(
                 BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, videoCodec, onStatus)
             }
             activeTransport = connectedTransport; connectedTransport.connect(); transport = connectedTransport
-            connectedTransport.sendMetadata(WIDTH, HEIGHT, FPS, VIDEO_BITRATE)
+            connectedTransport.sendMetadata(videoWidth, videoHeight, FPS, videoBitrate)
             val videoMime = if (videoCodec == VideoCodec.H265) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
             codec = MediaCodec.createEncoderByType(videoMime)
             val supportedColors = codec.codecInfo.getCapabilitiesForType(videoMime).colorFormats.toSet()
@@ -58,9 +64,9 @@ class YoutubePublisher(
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
                 else -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
             }
-            val format = MediaFormat.createVideoFormat(videoMime, WIDTH, HEIGHT).apply {
+            val format = MediaFormat.createVideoFormat(videoMime, videoWidth, videoHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
-                setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_BITRATE)
+                setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
             }
@@ -78,7 +84,7 @@ class YoutubePublisher(
                     if (index >= 0) {
                         codec.getInputBuffer(index)?.let { argbToYuv420(bitmap, it, colorFormat) }
                         val pts = (System.nanoTime() - startedAt) / 1_000
-                        codec.queueInputBuffer(index, 0, WIDTH * HEIGHT * 3 / 2, pts, 0)
+                        codec.queueInputBuffer(index, 0, videoWidth * videoHeight * 3 / 2, pts, 0)
                     }
                     bitmap.recycle()
                 }
@@ -105,7 +111,7 @@ class YoutubePublisher(
                             connectedTransport.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
                             sentFrames++
                             if (sentFrames == 1 || sentFrames % 150 == 0) {
-                                onStatus("● ENVIANDO ${protocol.label} · ${videoCodec.label} · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
+                                onStatus("● ENVIANDO ${protocol.label} · ${videoCodec.label} · ${videoWidth}×$videoHeight · ${videoBitrate / 1_000} kbps · $sentFrames quadros")
                             }
                         }
                         codec.releaseOutputBuffer(index, false)
@@ -130,21 +136,21 @@ class YoutubePublisher(
     }
 
     private fun argbToYuv420(bitmap: Bitmap, output: ByteBuffer, colorFormat: Int) {
-        val pixels = IntArray(WIDTH * HEIGHT)
-        bitmap.getPixels(pixels, 0, WIDTH, 0, 0, WIDTH, HEIGHT)
+        val pixels = IntArray(videoWidth * videoHeight)
+        bitmap.getPixels(pixels, 0, videoWidth, 0, 0, videoWidth, videoHeight)
         output.clear()
         for (color in pixels) {
             val r = color shr 16 and 255; val g = color shr 8 and 255; val b = color and 255
             val y = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).coerceIn(16, 235)
             output.put(y.toByte())
         }
-        val u = ByteArray(WIDTH * HEIGHT / 4)
-        val v = ByteArray(WIDTH * HEIGHT / 4)
+        val u = ByteArray(videoWidth * videoHeight / 4)
+        val v = ByteArray(videoWidth * videoHeight / 4)
         var chromaIndex = 0
-        for (y in 0 until HEIGHT step 2) for (x in 0 until WIDTH step 2) {
+        for (y in 0 until videoHeight step 2) for (x in 0 until videoWidth step 2) {
             var r = 0; var g = 0; var b = 0
             for (dy in 0..1) for (dx in 0..1) {
-                val color = pixels[(y + dy) * WIDTH + x + dx]
+                val color = pixels[(y + dy) * videoWidth + x + dx]
                 r += color shr 16 and 255; g += color shr 8 and 255; b += color and 255
             }
             val averageR = r / 4; val averageG = g / 4; val averageB = b / 4
@@ -173,7 +179,7 @@ class YoutubePublisher(
             codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
             codec.configure(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, AUDIO_RATE, 1).apply {
                 setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+                setInteger(MediaFormat.KEY_BIT_RATE, if (videoBitrate <= 500_000) 32_000 else 128_000)
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 8_192)
             }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start(); recorder.startRecording()
@@ -248,10 +254,7 @@ class YoutubePublisher(
     }
 
     companion object {
-        private const val WIDTH = 1280
-        private const val HEIGHT = 720
         private const val FPS = 15
-        private const val VIDEO_BITRATE = 3_000_000
         private const val AUDIO_RATE = 44_100
     }
 }
