@@ -31,6 +31,9 @@ import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
     private enum class Screen { BROADCAST, COURT, SCOREBOARD }
@@ -43,6 +46,9 @@ class MainActivity : AppCompatActivity() {
     private var boundCamera: Camera? = null
     private val courtAnalysisExecutor = Executors.newSingleThreadExecutor()
     private val scoreboardAnalysisExecutor = Executors.newSingleThreadExecutor()
+    private val courtFrameSignature = AtomicLong()
+    private val repeatedFrameCount = AtomicInteger()
+    private val distinctSourcesConfirmed = AtomicBoolean()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) showScreen(screen) else binding.cameraStatus.text = "Permissão da câmera necessária"
@@ -209,6 +215,8 @@ class MainActivity : AppCompatActivity() {
 
     @OptIn(ExperimentalCamera2Interop::class)
     private fun startCompositionPreview() {
+        repeatedFrameCount.set(0)
+        distinctSourcesConfirmed.set(false)
         val configuration = readForm()
         binding.composedOutput.configure(configuration)
         val courtKey = cameraIdFor(Screen.COURT) ?: return
@@ -223,9 +231,11 @@ class MainActivity : AppCompatActivity() {
             val scoreboardSelector = selectorFor(scoreboardInfo.logicalCameraId)
             val courtAnalysis = imageAnalysis(courtInfo)
             val scoreboardAnalysis = imageAnalysis(scoreboardInfo)
+            val sourceDescription = "quadra=${courtInfo.id}, placar=${scoreboardInfo.id}"
             courtAnalysis.setAnalyzer(courtAnalysisExecutor) { image ->
                 try {
                     val bitmap = YuvToBitmapConverter.convert(image)
+                    courtFrameSignature.set(frameSignature(bitmap))
                     binding.composedOutput.submitCourt(bitmap)
                     if (courtKey == scoreboardKey) {
                         binding.composedOutput.submitScoreboard(bitmap.copy(bitmap.config ?: android.graphics.Bitmap.Config.ARGB_8888, false))
@@ -233,7 +243,11 @@ class MainActivity : AppCompatActivity() {
                 } finally { image.close() }
             }
             scoreboardAnalysis.setAnalyzer(scoreboardAnalysisExecutor) { image ->
-                try { binding.composedOutput.submitScoreboard(YuvToBitmapConverter.convert(image)) } finally { image.close() }
+                try {
+                    val bitmap = YuvToBitmapConverter.convert(image)
+                    binding.composedOutput.submitScoreboard(bitmap)
+                    detectRepeatedSource(frameSignature(bitmap), sourceDescription)
+                } finally { image.close() }
             }
             try {
                 if (courtInfo.logicalCameraId == scoreboardInfo.logicalCameraId) {
@@ -243,6 +257,10 @@ class MainActivity : AppCompatActivity() {
                         provider.bindToLifecycle(this, courtSelector, courtAnalysis, scoreboardAnalysis)
                     }
                 } else {
+                    val requestedPair = setOf(courtInfo.logicalCameraId, scoreboardInfo.logicalCameraId)
+                    require(capabilities.concurrentPairs.any { it.containsAll(requestedPair) }) {
+                        "Par lógico não anunciado em concurrentCameraIds"
+                    }
                     val configurations = listOf(
                         ConcurrentCamera.SingleCameraConfig(courtSelector, UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
                         ConcurrentCamera.SingleCameraConfig(scoreboardSelector, UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
@@ -250,11 +268,15 @@ class MainActivity : AppCompatActivity() {
                     val concurrent = provider.bindToLifecycle(configurations)
                     boundCamera = concurrent.cameras.getOrNull(1)
                 }
-                binding.broadcastStatus.text = "Composição real ativa: crop 16:9 e homografia do placar aplicados aos frames."
+                binding.broadcastStatus.text = if (courtKey == scoreboardKey) {
+                    "⚠ A mesma fonte foi selecionada para quadra e placar ($sourceDescription)."
+                } else {
+                    "Composição ativa ($sourceDescription). Verificando se os fluxos são distintos…"
+                }
                 applyScoreboardZoom()
             } catch (error: RuntimeException) {
                 boundCamera = provider.bindToLifecycle(this, courtSelector, courtAnalysis)
-                binding.broadcastStatus.text = "Este par não pôde ser aberto junto; mostrando somente a quadra."
+                binding.broadcastStatus.text = "Incompatível com duas fontes ($sourceDescription): ${error.message}. Somente quadra."
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -272,6 +294,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cameraFor(key: String) = capabilities.cameras.firstOrNull { it.id == key }
+
+    private fun frameSignature(bitmap: android.graphics.Bitmap): Long {
+        var signature = 0L
+        var average = 0L
+        val samples = IntArray(64)
+        for (index in samples.indices) {
+            val x = ((index % 8 + .5f) * bitmap.width / 8f).toInt().coerceAtMost(bitmap.width - 1)
+            val y = ((index / 8 + .5f) * bitmap.height / 8f).toInt().coerceAtMost(bitmap.height - 1)
+            val color = bitmap.getPixel(x, y)
+            samples[index] = ((color shr 16 and 0xff) * 3 + (color shr 8 and 0xff) * 6 + (color and 0xff)) / 10
+            average += samples[index]
+        }
+        average /= samples.size
+        samples.forEachIndexed { index, value -> if (value >= average) signature = signature or (1L shl index) }
+        return signature
+    }
+
+    private fun detectRepeatedSource(scoreboardSignature: Long, description: String) {
+        val courtSignature = courtFrameSignature.get()
+        if (courtSignature == 0L) return
+        val distance = java.lang.Long.bitCount(courtSignature xor scoreboardSignature)
+        if (distance <= 3) {
+            if (repeatedFrameCount.incrementAndGet() >= 5) runOnUiThread {
+                binding.broadcastStatus.text = "⚠ O aparelho entregou a mesma imagem nas duas fontes ($description). Escolha sensores físicos distintos ou traseira + frontal."
+            }
+        } else {
+            repeatedFrameCount.set(0)
+            if (distinctSourcesConfirmed.compareAndSet(false, true)) runOnUiThread {
+                binding.broadcastStatus.text = "✓ Duas fontes distintas confirmadas ($description)."
+            }
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

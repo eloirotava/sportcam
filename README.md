@@ -45,6 +45,13 @@ lógica no S22. Quando dois sensores físicos pertencem à mesma câmera lógica
 `ImageAnalysis` recebe explicitamente seu `physicalCameraId`; para frontal + traseira,
 o app usa o par concorrente de câmeras lógicas.
 
+Na tela Ao vivo, o status mostra os dois IDs realmente solicitados. O app também
+compara assinaturas perceptuais dos frames: se o driver aceitar a sessão mas entregar
+a mesma imagem para os dois `ImageAnalysis`, ele mostra um aviso explícito. Para
+câmeras lógicas diferentes, o app só tenta o binding se o par estiver anunciado em
+`CameraManager.concurrentCameraIds`; caso contrário, informa a incompatibilidade e
+mantém somente a quadra.
+
 O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
 fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
