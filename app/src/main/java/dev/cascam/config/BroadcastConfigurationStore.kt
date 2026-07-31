@@ -2,6 +2,7 @@ package dev.cascam.config
 
 import android.content.Context
 import dev.cascam.geometry.NormalizedPoint
+import dev.cascam.geometry.NormalizedRect
 
 class BroadcastConfigurationStore(context: Context) {
     private val preferences = context.getSharedPreferences("broadcast_configuration", Context.MODE_PRIVATE)
@@ -13,10 +14,8 @@ class BroadcastConfigurationStore(context: Context) {
         cropPanX = preferences.getFloat("crop_pan_x", 0f),
         cropPanY = preferences.getFloat("crop_pan_y", 0f),
         scoreboardCorners = decodeCorners(preferences.getString("scoreboard_corners", null)),
+        scoreboardDestination = decodeRect(preferences.getString("scoreboard_destination", null)),
         scoreboardZoom = preferences.getFloat("scoreboard_zoom", 1f),
-        scoreboardPlacement = runCatching {
-            ScoreboardPlacement.valueOf(preferences.getString("scoreboard_placement", null).orEmpty())
-        }.getOrDefault(ScoreboardPlacement.TOP_RIGHT),
         youtubeServerUrl = preferences.getString("youtube_server", null)
             ?: "rtmps://a.rtmps.youtube.com/live2",
         youtubeStreamKey = preferences.getString("youtube_key", "").orEmpty(),
@@ -30,8 +29,8 @@ class BroadcastConfigurationStore(context: Context) {
             .putFloat("crop_pan_x", configuration.cropPanX)
             .putFloat("crop_pan_y", configuration.cropPanY)
             .putString("scoreboard_corners", configuration.scoreboardCorners.joinToString(";") { "${it.x},${it.y}" })
+            .putString("scoreboard_destination", with(configuration.scoreboardDestination) { "$left,$top,$right,$bottom" })
             .putFloat("scoreboard_zoom", configuration.scoreboardZoom)
-            .putString("scoreboard_placement", configuration.scoreboardPlacement.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
             .apply()
@@ -43,4 +42,10 @@ class BroadcastConfigurationStore(context: Context) {
             NormalizedPoint(coordinates[0].toFloat(), coordinates[1].toFloat())
         }.also { require(it.size == 4) }
     }.getOrDefault(DEFAULT_SCOREBOARD_CORNERS)
+
+    private fun decodeRect(value: String?): NormalizedRect = runCatching {
+        val coordinates = value.orEmpty().split(',').map(String::toFloat)
+        require(coordinates.size == 4)
+        NormalizedRect(coordinates[0], coordinates[1], coordinates[2], coordinates[3])
+    }.getOrDefault(DEFAULT_SCOREBOARD_DESTINATION)
 }

@@ -11,7 +11,6 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import dev.cascam.config.BroadcastConfiguration
-import dev.cascam.config.ScoreboardPlacement
 import dev.cascam.geometry.NormalizedRect
 
 class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
@@ -51,14 +50,8 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
     }
 
     private fun drawScoreboard(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration) {
-        val overlayWidth = width * .32f
-        val selectedWidth = (config.scoreboardCorners[1].x - config.scoreboardCorners[0].x) * bitmap.width
-        val selectedHeight = (config.scoreboardCorners[3].y - config.scoreboardCorners[0].y) * bitmap.height
-        val overlayHeight = (overlayWidth * selectedHeight / selectedWidth).coerceAtMost(height * .45f)
-        val margin = width * .025f
-        val left = if (config.scoreboardPlacement == ScoreboardPlacement.TOP_LEFT || config.scoreboardPlacement == ScoreboardPlacement.BOTTOM_LEFT) margin else width - overlayWidth - margin
-        val top = if (config.scoreboardPlacement == ScoreboardPlacement.TOP_LEFT || config.scoreboardPlacement == ScoreboardPlacement.TOP_RIGHT) margin else height - overlayHeight - margin
-        val destination = RectF(left, top, left + overlayWidth, top + overlayHeight)
+        val configured = config.scoreboardDestination
+        val destination = RectF(configured.left * width, configured.top * height, configured.right * width, configured.bottom * height)
         val sourcePoints = config.scoreboardCorners.flatMap { listOf(it.x * bitmap.width, it.y * bitmap.height) }.toFloatArray()
         val destinationPoints = floatArrayOf(
             destination.left, destination.top, destination.right, destination.top,

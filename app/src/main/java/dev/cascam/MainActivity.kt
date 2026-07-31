@@ -26,7 +26,6 @@ import dev.cascam.camera.CameraCapabilitiesReader
 import dev.cascam.camera.CameraInfo
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastConfigurationStore
-import dev.cascam.config.ScoreboardPlacement
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
@@ -76,12 +75,11 @@ class MainActivity : AppCompatActivity() {
         binding.scoreboardCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         binding.courtCamera.setSelection(cameraIds.indexOf(configuration.courtCameraId).takeIf { it >= 0 } ?: 0)
         binding.scoreboardCamera.setSelection(cameraIds.indexOf(configuration.scoreboardCameraId).takeIf { it >= 0 } ?: 0)
-        binding.scoreboardPlacement.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, ScoreboardPlacement.entries.map { it.label })
-        binding.scoreboardPlacement.setSelection(ScoreboardPlacement.entries.indexOf(configuration.scoreboardPlacement))
         binding.youtubeServer.setText(configuration.youtubeServerUrl)
         binding.youtubeKey.setText(configuration.youtubeStreamKey)
         binding.compositionOverlay.setCrop(configuration.cropZoom, configuration.cropPanX, configuration.cropPanY)
         binding.compositionOverlay.setScoreboardCorners(configuration.scoreboardCorners)
+        binding.compositionOverlay.setScoreboardDestination(configuration.scoreboardDestination)
         binding.scoreboardZoom.progress = ((configuration.scoreboardZoom - 1f) * 10f).toInt().coerceIn(0, 70)
         updateZoomLabels()
     }
@@ -112,12 +110,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.courtCamera.onItemSelectedListener = cameraListener
         binding.scoreboardCamera.onItemSelectedListener = cameraListener
-        binding.scoreboardPlacement.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (screen == Screen.BROADCAST) binding.composedOutput.configure(readForm())
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
     }
 
     private fun showScreen(target: Screen) {
@@ -151,8 +143,8 @@ class MainActivity : AppCompatActivity() {
             scoreboardCameraId = cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition).orEmpty(),
             cropZoom = cropZoom, cropPanX = cropPanX, cropPanY = cropPanY,
             scoreboardCorners = binding.compositionOverlay.scoreboardCorners(),
+            scoreboardDestination = binding.compositionOverlay.scoreboardDestination(),
             scoreboardZoom = scoreboardZoom(),
-            scoreboardPlacement = ScoreboardPlacement.entries[binding.scoreboardPlacement.selectedItemPosition],
             youtubeServerUrl = binding.youtubeServer.text.toString().trim().removeSuffix("/"),
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
         )
@@ -243,7 +235,6 @@ class MainActivity : AppCompatActivity() {
             val provider = future.get()
             provider.unbindAll()
             val courtSelector = selectorFor(courtInfo.logicalCameraId)
-            val scoreboardSelector = selectorFor(scoreboardInfo.logicalCameraId)
             val courtAnalysis = imageAnalysis(courtInfo)
             val scoreboardAnalysis = imageAnalysis(scoreboardInfo)
             val sourceDescription = "quadra=${courtInfo.id}, placar=${scoreboardInfo.id}"
@@ -273,12 +264,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     val requestedPair = setOf(courtInfo.logicalCameraId, scoreboardInfo.logicalCameraId)
-                    require(capabilities.concurrentPairs.any { it.containsAll(requestedPair) }) {
-                        "Par lógico não anunciado em concurrentCameraIds"
-                    }
+                    val advertisedGroup = provider.availableConcurrentCameraInfos.firstOrNull { group ->
+                        group.map { Camera2CameraInfo.from(it).cameraId }.toSet().containsAll(requestedPair)
+                    } ?: error("CameraX não anunciou o par ${requestedPair.sorted().joinToString(" + ")}")
+                    val advertisedCourt = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == courtInfo.logicalCameraId }
+                    val advertisedScoreboard = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == scoreboardInfo.logicalCameraId }
                     val configurations = listOf(
-                        ConcurrentCamera.SingleCameraConfig(courtSelector, UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
-                        ConcurrentCamera.SingleCameraConfig(scoreboardSelector, UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(advertisedCourt), UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(advertisedScoreboard), UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
                     )
                     val concurrent = provider.bindToLifecycle(configurations)
                     boundCamera = concurrent.cameras.getOrNull(1)
@@ -300,6 +293,9 @@ class MainActivity : AppCompatActivity() {
     private fun selectorFor(cameraId: String) = CameraSelector.Builder().addCameraFilter { cameras ->
         cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
     }.build()
+
+    private fun selectorFor(cameraInfo: androidx.camera.core.CameraInfo) =
+        CameraSelector.Builder().addCameraFilter { cameras -> cameras.filter { it === cameraInfo } }.build()
 
     @ExperimentalCamera2Interop
     private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {

@@ -19,17 +19,18 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - projeto Android nativo (Kotlin, minSdk 31);
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
-- quadrilátero do placar com quatro alças arrastáveis;
+- área de captura do placar e destino na composição com duas alças diagonais cada;
 - seleção independente da câmera da quadra e do placar, incluindo lentes traseiras,
   frontais e externas anunciadas pelo Android;
-- controles de zoom e deslocamento do recorte, posição do placar na composição e
+- controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
   servidor/chave do YouTube, persistidos localmente;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
 A interface agora é dividida em três telas: **Quadra**, onde o retângulo 16:9 é
-movido por arraste e redimensionado com gesto de pinça; **Placar**, onde são escolhidos
-a câmera, seu zoom e os quatro cantos; e **Ao vivo**, que reúne a composição e os
+movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
+ajustados a área amarela capturada e o retângulo azul de destino, além da câmera e seu
+zoom; e **Ao vivo**, que reúne a composição e os
 dados do YouTube. O botão de play já valida e salva a configuração, mas ainda não
 envia vídeo: o compositor de duas entradas, encoder e cliente RTMPS continuam sendo
 a próxima entrega. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
@@ -48,9 +49,11 @@ o app usa o par concorrente de câmeras lógicas.
 Na tela Ao vivo, o status mostra os dois IDs realmente solicitados. O app também
 compara assinaturas perceptuais dos frames: se o driver aceitar a sessão mas entregar
 a mesma imagem para os dois `ImageAnalysis`, ele mostra um aviso explícito. Para
-câmeras lógicas diferentes, o app só tenta o binding se o par estiver anunciado em
-`CameraManager.concurrentCameraIds`; caso contrário, informa a incompatibilidade e
-mantém somente a quadra.
+câmeras lógicas diferentes, o app procura o par nos objetos efetivamente anunciados
+por `ProcessCameraProvider.availableConcurrentCameraInfos` e usa exatamente esses
+objetos no binding. O diagnóstico também apresenta os IDs publicados por
+`CameraManager.concurrentCameraIds`; caso o CameraX não ofereça o mesmo par, informa
+a incompatibilidade e mantém somente a quadra.
 
 O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
 fica nas preferências privadas do app, com backup desabilitado; uma versão de
