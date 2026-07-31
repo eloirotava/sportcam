@@ -9,6 +9,7 @@ data class BroadcastConfiguration(
     val cropPanX: Float = 0f,
     val cropPanY: Float = 0f,
     val scoreboardCorners: List<NormalizedPoint> = DEFAULT_SCOREBOARD_CORNERS,
+    val scoreboardZoom: Float = 1f,
     val scoreboardPlacement: ScoreboardPlacement = ScoreboardPlacement.TOP_RIGHT,
     val youtubeServerUrl: String = "rtmps://a.rtmps.youtube.com/live2",
     val youtubeStreamKey: String = "",

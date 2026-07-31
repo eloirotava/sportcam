@@ -27,6 +27,13 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
+A interface agora é dividida em três telas: **Quadra**, onde o retângulo 16:9 é
+movido por arraste e redimensionado com gesto de pinça; **Placar**, onde são escolhidos
+a câmera, seu zoom e os quatro cantos; e **Ao vivo**, que reúne a composição e os
+dados do YouTube. O botão de play já valida e salva a configuração, mas ainda não
+envia vídeo: o compositor de duas entradas, encoder e cliente RTMPS continuam sendo
+a próxima entrega. A tela informa isso explicitamente para não simular uma live.
+
 O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
 fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.

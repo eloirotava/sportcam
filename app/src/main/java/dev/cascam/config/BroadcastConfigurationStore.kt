@@ -13,6 +13,7 @@ class BroadcastConfigurationStore(context: Context) {
         cropPanX = preferences.getFloat("crop_pan_x", 0f),
         cropPanY = preferences.getFloat("crop_pan_y", 0f),
         scoreboardCorners = decodeCorners(preferences.getString("scoreboard_corners", null)),
+        scoreboardZoom = preferences.getFloat("scoreboard_zoom", 1f),
         scoreboardPlacement = runCatching {
             ScoreboardPlacement.valueOf(preferences.getString("scoreboard_placement", null).orEmpty())
         }.getOrDefault(ScoreboardPlacement.TOP_RIGHT),
@@ -29,6 +30,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putFloat("crop_pan_x", configuration.cropPanX)
             .putFloat("crop_pan_y", configuration.cropPanY)
             .putString("scoreboard_corners", configuration.scoreboardCorners.joinToString(";") { "${it.x},${it.y}" })
+            .putFloat("scoreboard_zoom", configuration.scoreboardZoom)
             .putString("scoreboard_placement", configuration.scoreboardPlacement.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
