@@ -45,6 +45,7 @@ import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
 import dev.cascam.stream.YoutubePublisher
+import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -210,6 +211,7 @@ class MainActivity : AppCompatActivity() {
     private fun cameraIdFor(target: Screen): String? = when (target) {
         Screen.BROADCAST, Screen.COURT -> cameraIds.getOrNull(binding.courtCamera.selectedItemPosition)
         Screen.SCOREBOARD -> cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition)
+        Screen.DIAGNOSTICS -> null
     }
 
     private fun readForm(): BroadcastConfiguration {
@@ -246,8 +248,8 @@ class MainActivity : AppCompatActivity() {
             runCatching {
                 val authorization = youtubeApi.beginDeviceAuthorization(clientId)
                 runOnUiThread { showDeviceCode(authorization); openVerificationPage() }
-                youtubeApi.finishDeviceAuthorization(clientId, clientSecret, authorization) {
-                    runOnUiThread { binding.oauthStatus.text = "Aguardando a confirmação do código ${authorization.userCode} no navegador…" }
+                youtubeApi.finishDeviceAuthorization(clientId, clientSecret, authorization) { status ->
+                    runOnUiThread { binding.oauthStatus.text = status }
                 }
             }.onSuccess {
                 runOnUiThread {
@@ -257,7 +259,12 @@ class MainActivity : AppCompatActivity() {
                     saveConfiguration()
                 }
             }.onFailure { error ->
-                runOnUiThread { binding.oauthStatus.text = "Falha OAuth: ${error.message}" }
+                val explanation = if (error is IOException) {
+                    "Sem conexão com o Google (${error.javaClass.simpleName}). Confira se o CasCam pode usar dados em segundo plano: Ajustes › Apps › CasCam › Dados móveis, com Economia de dados desligada ou o app liberado."
+                } else {
+                    "Falha OAuth: ${error.message}"
+                }
+                runOnUiThread { binding.oauthStatus.text = explanation }
             }
         }.start()
     }

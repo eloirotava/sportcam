@@ -3,6 +3,7 @@ package dev.cascam.youtube
 import android.content.Context
 import dev.cascam.config.BroadcastProtocol
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -34,18 +35,34 @@ class YoutubeLiveApi(context: Context) {
         )
     }
 
-    fun finishDeviceAuthorization(clientId: String, clientSecret: String, authorization: DeviceAuthorization, onWaiting: () -> Unit): String {
+    /**
+     * Fica consultando o Google até o usuário aprovar o código.
+     *
+     * Falha de rede aqui não é recusa: enquanto o usuário aprova no navegador o CasCam está em
+     * segundo plano, e é justamente aí que a Economia de dados, o modo de espera de apps ou uma
+     * troca de Wi-Fi para dados móveis derrubam o DNS do processo. Antes isso abortava o fluxo
+     * inteiro e queimava o código; agora só adia a próxima tentativa até o código expirar de fato.
+     */
+    fun finishDeviceAuthorization(clientId: String, clientSecret: String, authorization: DeviceAuthorization, onWaiting: (String) -> Unit): String {
         val deadline = System.currentTimeMillis() + authorization.expiresInSeconds * 1_000L
         var interval = authorization.intervalSeconds
+        var offlineAttempts = 0
         while (System.currentTimeMillis() < deadline) {
             Thread.sleep(interval * 1_000L)
             val values = mutableMapOf(
                 "client_id" to clientId, "device_code" to authorization.deviceCode,
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ).also { if (clientSecret.isNotBlank()) it["client_secret"] = clientSecret }
-            val response = postForm("https://oauth2.googleapis.com/token", values, acceptErrors = true)
+            val response = try {
+                postForm("https://oauth2.googleapis.com/token", values, acceptErrors = true)
+            } catch (error: IOException) {
+                offlineAttempts++
+                onWaiting("Sem rede para falar com o Google ($offlineAttempts ${if (offlineAttempts == 1) "tentativa" else "tentativas"}). Volte ao CasCam e mantenha o app aberto; o código ${authorization.userCode} continua valendo.")
+                continue
+            }
+            offlineAttempts = 0
             when (response.optString("error")) {
-                "authorization_pending" -> onWaiting()
+                "authorization_pending" -> onWaiting("Aguardando a confirmação do código ${authorization.userCode} no navegador…")
                 "slow_down" -> interval += 5
                 "" -> return saveTokens(response)
                 else -> error("OAuth recusado: ${response.optString("error_description", response.optString("error"))}")

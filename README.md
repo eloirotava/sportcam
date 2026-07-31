@@ -168,6 +168,19 @@ O app cria `liveBroadcast` com início/parada automáticos, cria `liveStream`, f
 ficam nas preferências privadas sem backup; antes de distribuição pública deverão ser
 migrados para armazenamento criptografado pelo Android Keystore.
 
+Dois erros comuns nesse fluxo:
+
+- **"Acesso bloqueado: o app não concluiu o processo de verificação do Google"** — o
+  scope `youtube` é sensível, então enquanto a tela de consentimento estiver em
+  *Testing* só contas listadas em **Usuários de teste** conseguem autorizar. Adicione
+  a sua conta ali. Verificação só é exigida para distribuir a terceiros.
+- **"Unable to resolve host"** durante a espera pela aprovação — o CasCam fica em
+  segundo plano enquanto você aprova no navegador, e a Economia de dados, o modo de
+  espera de apps ou uma troca de Wi-Fi para dados móveis cortam a rede do processo
+  exatamente aí. O app não aborta mais nesse caso: continua tentando até o código
+  expirar de fato. Voltar para o CasCam depois de aprovar resolve na hora; para não
+  depender disso, libere o app em Ajustes › Apps › CasCam › Dados móveis.
+
 ### Tela apagada e economia de dados
 
 Durante a transmissão, um foreground service de câmera/microfone mantém uma
