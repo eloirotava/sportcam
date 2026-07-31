@@ -47,6 +47,9 @@
                     <TextView style="@style/PanelLabel" android:text="Privacidade" />
                     <Spinner android:id="@+id/live_privacy" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelHint" android:text="Não listada abre só por link direto e não aparece na página do canal. Escolha Público para a live ser vista por quem entra no seu canal." />
+                    <TextView style="@style/PanelLabel" android:text="Latência" />
+                    <Spinner android:id="@+id/live_latency" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView android:id="@+id/latency_hint" style="@style/PanelHint" android:text="HLS é segmentado e não alcança a ultrabaixa; para o menor atraso use RTMPS." />
                     <Button android:id="@+id/authorize_youtube" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="1. AUTORIZAR YOUTUBE" />
                     <LinearLayout android:id="@+id/oauth_code_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
                         android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">

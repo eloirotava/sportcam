@@ -38,6 +38,7 @@ import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.VideoCodec
 import dev.cascam.config.BitratePreset
+import dev.cascam.config.LiveLatency
 import dev.cascam.config.LivePrivacy
 import dev.cascam.youtube.YoutubeLiveApi
 import dev.cascam.config.BroadcastConfigurationStore
@@ -111,6 +112,8 @@ class MainActivity : AppCompatActivity() {
         binding.bitratePreset.setSelection(BitratePreset.entries.indexOf(configuration.bitratePreset))
         binding.livePrivacy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LivePrivacy.entries.map { it.label })
         binding.livePrivacy.setSelection(LivePrivacy.entries.indexOf(configuration.livePrivacy))
+        binding.liveLatency.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LiveLatency.entries.map { it.label })
+        binding.liveLatency.setSelection(LiveLatency.entries.indexOf(configuration.liveLatency))
         binding.youtubeClientId.setText(configuration.youtubeOAuthClientId)
         binding.youtubeClientSecret.setText(configuration.youtubeOAuthClientSecret)
         binding.liveTitle.setText(configuration.liveTitle)
@@ -171,6 +174,7 @@ class MainActivity : AppCompatActivity() {
                 val protocol = BroadcastProtocol.entries[position]
                 binding.videoCodec.isEnabled = protocol == BroadcastProtocol.HLS
                 if (protocol == BroadcastProtocol.RTMPS) binding.videoCodec.setSelection(VideoCodec.entries.indexOf(VideoCodec.H264))
+                applyLatencyRestrictions(protocol)
                 val current = binding.youtubeServer.text.toString()
                 if (protocol == BroadcastProtocol.HLS && current.startsWith("rtmp")) {
                     binding.youtubeServer.setText("https://a.upload.youtube.com/http_upload_hls?cid=&copy=0&file=")
@@ -238,6 +242,7 @@ class MainActivity : AppCompatActivity() {
             youtubeOAuthClientSecret = binding.youtubeClientSecret.text.toString().trim(),
             liveTitle = binding.liveTitle.text.toString().trim().ifBlank { "CasCam ao vivo" },
             livePrivacy = LivePrivacy.entries[binding.livePrivacy.selectedItemPosition],
+            liveLatency = LiveLatency.entries[binding.liveLatency.selectedItemPosition],
         )
     }
 
@@ -308,7 +313,7 @@ class MainActivity : AppCompatActivity() {
             runCatching {
                 youtubeApi.createAndBindBroadcast(
                     configuration.youtubeOAuthClientId, configuration.youtubeOAuthClientSecret, configuration.liveTitle,
-                    configuration.livePrivacy.apiValue, configuration.protocol,
+                    configuration.livePrivacy.apiValue, configuration.protocol, configuration.liveLatency,
                 )
             }.onSuccess { created ->
                 runOnUiThread {
@@ -364,6 +369,23 @@ class MainActivity : AppCompatActivity() {
         if (clipboard == null) { toast("Área de transferência indisponível"); return }
         clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras CasCam", probeReport))
         toast("Relatório copiado")
+    }
+
+    /** A ultrabaixa não existe em ingestão HLS; em vez de deixar o YouTube recusar, resolve aqui. */
+    private fun applyLatencyRestrictions(protocol: BroadcastProtocol) {
+        val chosen = LiveLatency.entries[binding.liveLatency.selectedItemPosition]
+        if (protocol == BroadcastProtocol.HLS && chosen.requiresRtmps) {
+            binding.liveLatency.setSelection(LiveLatency.entries.indexOf(LiveLatency.LOW))
+            binding.latencyHint.text = "Ultrabaixa não vale em HLS; troquei para Baixa. Para o menor atraso, escolha RTMPS."
+        } else {
+            binding.latencyHint.text = when {
+                protocol == BroadcastProtocol.HLS ->
+                    "HLS envia em segmentos de 2 s e o YouTube ainda precisa juntar alguns antes de publicar, então o atraso fica na casa dos 15 a 30 s. Para menos que isso, RTMPS."
+                chosen == LiveLatency.ULTRA_LOW -> "Menor atraso possível, sem DVR: quem assiste não consegue voltar a fita."
+                chosen == LiveLatency.LOW -> "Meio-termo do Studio, com DVR preservado."
+                else -> "Mais buffer no YouTube: melhor para rede instável, pior para acompanhar o jogo ao vivo."
+            }
+        }
     }
 
     private fun checkLiveHealth() {

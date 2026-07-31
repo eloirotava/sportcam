@@ -21,6 +21,7 @@ data class BroadcastConfiguration(
     val youtubeOAuthClientSecret: String = "",
     val liveTitle: String = "CasCam ao vivo",
     val livePrivacy: LivePrivacy = LivePrivacy.UNLISTED,
+    val liveLatency: LiveLatency = LiveLatency.LOW,
 )
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
@@ -34,6 +35,17 @@ enum class BitratePreset(val label: String, val bitsPerSecond: Int?) {
 }
 enum class LivePrivacy(val label: String, val apiValue: String) {
     UNLISTED("Não listado", "unlisted"), PRIVATE("Privado", "private"), PUBLIC("Público", "public"),
+}
+
+/**
+ * Mesmas opções do YouTube Studio. A ultrabaixa não existe em HLS: ingestão por segmentos não
+ * chega lá, por construção — quem quer o menor atraso precisa estar em RTMPS. A ultrabaixa
+ * também abre mão do DVR, então quem assiste não consegue voltar a fita durante o jogo.
+ */
+enum class LiveLatency(val label: String, val apiValue: String, val allowsDvr: Boolean, val requiresRtmps: Boolean) {
+    NORMAL("Normal · mais estável", "normal", true, false),
+    LOW("Baixa", "low", true, false),
+    ULTRA_LOW("Ultrabaixa · só RTMPS, sem DVR", "ultraLow", false, true),
 }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)

@@ -2,6 +2,7 @@ package dev.cascam.youtube
 
 import android.content.Context
 import dev.cascam.config.BroadcastProtocol
+import dev.cascam.config.LiveLatency
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -125,7 +126,14 @@ class YoutubeLiveApi(context: Context) {
 
     fun hasRefreshToken(): Boolean = preferences.getString("refresh_token", null) != null
 
-    fun createAndBindBroadcast(clientId: String, clientSecret: String, title: String, privacy: String, protocol: BroadcastProtocol): Ingestion {
+    fun createAndBindBroadcast(
+        clientId: String,
+        clientSecret: String,
+        title: String,
+        privacy: String,
+        protocol: BroadcastProtocol,
+        latency: LiveLatency,
+    ): Ingestion {
         val token = accessToken(clientId, clientSecret)
         val broadcast = requestJson(
             "https://www.googleapis.com/youtube/v3/liveBroadcasts?part=snippet,status,contentDetails",
@@ -133,6 +141,8 @@ class YoutubeLiveApi(context: Context) {
             JSONObject().put("snippet", JSONObject().put("title", title).put("scheduledStartTime", Instant.now().plusSeconds(15).toString()))
                 .put("status", JSONObject().put("privacyStatus", privacy).put("selfDeclaredMadeForKids", false))
                 .put("contentDetails", JSONObject().put("enableAutoStart", true).put("enableAutoStop", true)
+                    .put("latencyPreference", latency.apiValue)
+                    .put("enableDvr", latency.allowsDvr)
                     .put("monitorStream", JSONObject().put("enableMonitorStream", false))),
         )
         val stream = requestJson(

@@ -34,6 +34,9 @@ class BroadcastConfigurationStore(context: Context) {
         livePrivacy = runCatching {
             LivePrivacy.valueOf(preferences.getString("live_privacy", null).orEmpty())
         }.getOrDefault(LivePrivacy.UNLISTED),
+        liveLatency = runCatching {
+            LiveLatency.valueOf(preferences.getString("live_latency", null).orEmpty())
+        }.getOrDefault(LiveLatency.LOW),
     )
 
     fun save(configuration: BroadcastConfiguration) {
@@ -55,6 +58,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("youtube_oauth_client_secret", configuration.youtubeOAuthClientSecret)
             .putString("live_title", configuration.liveTitle)
             .putString("live_privacy", configuration.livePrivacy.name)
+            .putString("live_latency", configuration.liveLatency.name)
             .apply()
     }
 
