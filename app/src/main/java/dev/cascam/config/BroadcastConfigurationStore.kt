@@ -16,6 +16,9 @@ class BroadcastConfigurationStore(context: Context) {
         scoreboardCorners = decodeCorners(preferences.getString("scoreboard_corners", null)),
         scoreboardDestination = decodeRect(preferences.getString("scoreboard_destination", null)),
         scoreboardZoom = preferences.getFloat("scoreboard_zoom", 1f),
+        protocol = runCatching {
+            BroadcastProtocol.valueOf(preferences.getString("broadcast_protocol", null).orEmpty())
+        }.getOrDefault(BroadcastProtocol.RTMPS),
         youtubeServerUrl = preferences.getString("youtube_server", null)
             ?: "rtmps://a.rtmps.youtube.com/live2",
         youtubeStreamKey = preferences.getString("youtube_key", "").orEmpty(),
@@ -31,6 +34,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("scoreboard_corners", configuration.scoreboardCorners.joinToString(";") { "${it.x},${it.y}" })
             .putString("scoreboard_destination", with(configuration.scoreboardDestination) { "$left,$top,$right,$bottom" })
             .putFloat("scoreboard_zoom", configuration.scoreboardZoom)
+            .putString("broadcast_protocol", configuration.protocol.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
             .apply()

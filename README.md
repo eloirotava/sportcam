@@ -88,18 +88,15 @@ e [Samsung Director's View](https://www.samsung.com/us/support/answer/ANS0008812
 
 ## HLS direto para o YouTube
 
-O YouTube também aceita **HLS como protocolo de ingestão**, além de RTMPS. Não se
+O YouTube também aceita **HLS como protocolo de ingestão**, além de RTMPS. O protocolo
+pode ser escolhido na tela **Ao vivo**. Não se
 trata de servir a playlist pelo celular para espectadores: o encoder deve enviar por
 HTTP a playlist e os segmentos ao endpoint de upload HLS fornecido pelo YouTube
-Studio. O fluxo planejado para o CasCam é:
-
-> **Estado atual:** o aplicativo ainda publica somente por RTMPS. Esta seção descreve
-> a implementação HLS planejada; ainda não há muxer MPEG-TS, playlist nem uploader HLS
-> no código.
+Studio. A implementação do CasCam:
 
 1. selecionar **HLS** como protocolo da transmissão no YouTube Studio e copiar a URL
    de ingestão/chave gerada para aquela live;
-2. reutilizar os H.264/AAC já produzidos pelo app;
+2. reutiliza os H.264/AAC já produzidos pelo app;
 3. multiplexar os pacotes em MPEG-TS, preservando PTS/DTS;
 4. fechar segmentos curtos, inicialmente de 2 segundos, sempre começando em um
    keyframe;
@@ -107,10 +104,9 @@ Studio. O fluxo planejado para o CasCam é:
 6. fazer upload HTTP dos segmentos e da playlist para o prefixo indicado pelo Studio,
    com repetição segura, descarte de arquivos antigos e reconexão.
 
-HLS aumenta a latência e exige um segmentador MPEG-TS, gerenciador de playlist e
-uploader resiliente; portanto não é apenas trocar `rtmps://` por `https://`. A
-composição e os encoders atuais podem ser reaproveitados, enquanto a camada
-`RtmpClient` será substituída por esse muxer/uploader. A URL HLS deve vir do Studio —
+HLS aumenta a latência e usa um segmentador MPEG-TS, playlist deslizante e uploader
+HTTP com três tentativas por arquivo. A composição e os encoders são compartilhados
+pelos dois transportes. A URL HLS deve vir do Studio —
 o endpoint RTMPS atual não aceita playlists ou segmentos.
 
 Referências: [YouTube — HLS ingestion protocol](https://support.google.com/youtube/answer/10349430)

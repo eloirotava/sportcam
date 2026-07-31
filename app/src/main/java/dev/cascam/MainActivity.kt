@@ -29,6 +29,7 @@ import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraCapabilitiesReader
 import dev.cascam.camera.CameraInfo
 import dev.cascam.config.BroadcastConfiguration
+import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
@@ -83,6 +84,8 @@ class MainActivity : AppCompatActivity() {
         binding.scoreboardCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         binding.courtCamera.setSelection(cameraIds.indexOf(configuration.courtCameraId).takeIf { it >= 0 } ?: 0)
         binding.scoreboardCamera.setSelection(cameraIds.indexOf(configuration.scoreboardCameraId).takeIf { it >= 0 } ?: 0)
+        binding.broadcastProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BroadcastProtocol.entries.map { it.label })
+        binding.broadcastProtocol.setSelection(BroadcastProtocol.entries.indexOf(configuration.protocol))
         binding.youtubeServer.setText(configuration.youtubeServerUrl)
         binding.youtubeKey.setText(configuration.youtubeStreamKey)
         binding.compositionOverlay.setCrop(configuration.cropZoom, configuration.cropPanX, configuration.cropPanY)
@@ -118,6 +121,18 @@ class MainActivity : AppCompatActivity() {
         }
         binding.courtCamera.onItemSelectedListener = cameraListener
         binding.scoreboardCamera.onItemSelectedListener = cameraListener
+        binding.broadcastProtocol.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val protocol = BroadcastProtocol.entries[position]
+                val current = binding.youtubeServer.text.toString()
+                if (protocol == BroadcastProtocol.HLS && current.startsWith("rtmp")) {
+                    binding.youtubeServer.setText("https://a.upload.youtube.com/http_upload_hls?cid=&copy=0&file=")
+                } else if (protocol == BroadcastProtocol.RTMPS && current.startsWith("http")) {
+                    binding.youtubeServer.setText("rtmps://a.rtmps.youtube.com/live2")
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     private fun showScreen(target: Screen) {
@@ -154,6 +169,7 @@ class MainActivity : AppCompatActivity() {
             scoreboardCorners = binding.compositionOverlay.scoreboardCorners(),
             scoreboardDestination = binding.compositionOverlay.scoreboardDestination(),
             scoreboardZoom = scoreboardZoom(),
+            protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             youtubeServerUrl = binding.youtubeServer.text.toString().trim().removeSuffix("/"),
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
         )
@@ -169,7 +185,8 @@ class MainActivity : AppCompatActivity() {
     private fun validatedBroadcast(): BroadcastConfiguration? {
         val configuration = readForm()
         return when {
-            !configuration.youtubeServerUrl.startsWith("rtmps://") -> null.also { binding.youtubeServer.error = "Use uma URL RTMPS" }
+            configuration.protocol == BroadcastProtocol.RTMPS && !configuration.youtubeServerUrl.startsWith("rtmps://") -> null.also { binding.youtubeServer.error = "Use uma URL RTMPS" }
+            configuration.protocol == BroadcastProtocol.HLS && !configuration.youtubeServerUrl.startsWith("https://") -> null.also { binding.youtubeServer.error = "Use a URL HTTPS de ingestão HLS do YouTube Studio" }
             configuration.youtubeStreamKey.isBlank() -> null.also { binding.youtubeKey.error = "Informe a chave do YouTube Studio" }
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> null.also {
                 toast("Autorize o microfone para transmitir com áudio")
@@ -186,13 +203,15 @@ class MainActivity : AppCompatActivity() {
         }
         val configuration = validatedBroadcast() ?: return
         store.save(configuration)
-        publisher = YoutubePublisher(configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
+        publisher = YoutubePublisher(configuration.protocol, configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
             runOnUiThread {
                 binding.broadcastStatus.text = status
                 if (status.startsWith("Falha")) {
+                    val failedPublisher = publisher
                     publisher = null
                     binding.composedOutput.onComposedFrame = null
                     binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
+                    Thread { failedPublisher?.close() }.start()
                 }
             }
         }.also { active ->

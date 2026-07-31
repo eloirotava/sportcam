@@ -7,11 +7,13 @@ import android.media.MediaFormat
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import dev.cascam.config.BroadcastProtocol
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 class YoutubePublisher(
+    private val protocol: BroadcastProtocol,
     private val serverUrl: String,
     private val streamKey: String,
     private val onStatus: (String) -> Unit,
@@ -19,7 +21,7 @@ class YoutubePublisher(
     private val running = AtomicBoolean()
     private val frames = ArrayBlockingQueue<Bitmap>(1)
     private var worker: Thread? = null
-    @Volatile private var activeClient: RtmpClient? = null
+    @Volatile private var activeTransport: MediaTransport? = null
     private var audioWorker: Thread? = null
 
     fun start() {
@@ -35,12 +37,15 @@ class YoutubePublisher(
 
     private fun publishLoop() {
         var codec: MediaCodec? = null
-        var rtmp: RtmpClient? = null
+        var transport: MediaTransport? = null
         try {
-            onStatus("Conectando ao YouTube por RTMPS…")
-            val connectedRtmp = RtmpClient(serverUrl, streamKey).also { activeClient = it; it.connect() }
-            rtmp = connectedRtmp
-            connectedRtmp.sendMetadata(WIDTH, HEIGHT, FPS, VIDEO_BITRATE)
+            onStatus(if (protocol == BroadcastProtocol.HLS) "Preparando segmentos HLS…" else "Conectando ao YouTube por RTMPS…")
+            val connectedTransport: MediaTransport = when (protocol) {
+                BroadcastProtocol.RTMPS -> RtmpTransport(RtmpClient(serverUrl, streamKey))
+                BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, onStatus)
+            }
+            activeTransport = connectedTransport; connectedTransport.connect(); transport = connectedTransport
+            connectedTransport.sendMetadata(WIDTH, HEIGHT, FPS, VIDEO_BITRATE)
             codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             val supportedColors = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).colorFormats.toSet()
             val colorFormat = when {
@@ -59,8 +64,8 @@ class YoutubePublisher(
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             val startedAt = System.nanoTime()
-            audioWorker = Thread({ publishAudio(connectedRtmp, startedAt) }, "cascam-audio").also { it.start() }
-            onStatus("Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
+            audioWorker = Thread({ publishAudio(connectedTransport, startedAt) }, "cascam-audio").also { it.start() }
+            onStatus(if (protocol == BroadcastProtocol.HLS) "HLS ativo; aguardando o primeiro segmento de 2 s…" else "Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
             val info = MediaCodec.BufferInfo()
             var sentConfig = false
             var sentFrames = 0
@@ -85,15 +90,15 @@ class YoutubePublisher(
                             ?: error("Encoder H.264 não forneceu SPS")
                         val pps = units.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1f) == 8 }
                             ?: error("Encoder H.264 não forneceu PPS")
-                        connectedRtmp.sendAvcSequenceHeader(sps, pps); sentConfig = true
+                        connectedTransport.sendAvcSequenceHeader(sps, pps); sentConfig = true
                     } else if (index >= 0) {
                         if (sentConfig && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val data = ByteArray(info.size)
                             codec.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size); get(data) }
-                            connectedRtmp.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
+                            connectedTransport.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
                             sentFrames++
                             if (sentFrames == 1 || sentFrames % 150 == 0) {
-                                onStatus("● ENVIANDO · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
+                                onStatus("● ENVIANDO ${protocol.label} · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
                             }
                         }
                         codec.releaseOutputBuffer(index, false)
@@ -106,13 +111,13 @@ class YoutubePublisher(
         } finally {
             frames.forEach(Bitmap::recycle); frames.clear()
             audioWorker?.join(1_000); audioWorker = null
-            runCatching { codec?.stop() }; runCatching { codec?.release() }; rtmp?.close(); activeClient = null
+            runCatching { codec?.stop() }; runCatching { codec?.release() }; transport?.close(); activeTransport = null
         }
     }
 
     override fun close() {
         if (!running.getAndSet(false)) return
-        activeClient?.close()
+        activeTransport?.close()
         worker?.join(2_000)
         onStatus("Transmissão encerrada")
     }
@@ -148,7 +153,7 @@ class YoutubePublisher(
         output.flip()
     }
 
-    private fun publishAudio(rtmp: RtmpClient, startedAt: Long) {
+    private fun publishAudio(transport: MediaTransport, startedAt: Long) {
         var codec: MediaCodec? = null
         var recorder: AudioRecord? = null
         try {
@@ -181,12 +186,12 @@ class YoutubePublisher(
                     val outputIndex = codec.dequeueOutputBuffer(info, 0)
                     if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val config = codec.outputFormat.getByteBuffer("csd-0")?.toByteArray() ?: byteArrayOf(0x12, 0x08)
-                        rtmp.sendAacSequenceHeader(config); sentConfig = true
+                        transport.sendAacSequenceHeader(config); sentConfig = true
                     } else if (outputIndex >= 0) {
                         if (sentConfig && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val data = ByteArray(info.size)
                             codec.getOutputBuffer(outputIndex)!!.apply { position(info.offset); limit(info.offset + info.size); get(data) }
-                            rtmp.sendAudio(data, (info.presentationTimeUs / 1_000).toInt())
+                            transport.sendAudio(data, (info.presentationTimeUs / 1_000).toInt())
                         }
                         codec.releaseOutputBuffer(outputIndex, false)
                     } else break

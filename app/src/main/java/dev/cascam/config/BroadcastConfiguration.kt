@@ -12,9 +12,12 @@ data class BroadcastConfiguration(
     val scoreboardCorners: List<NormalizedPoint> = DEFAULT_SCOREBOARD_CORNERS,
     val scoreboardDestination: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
     val scoreboardZoom: Float = 1f,
+    val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val youtubeServerUrl: String = "rtmps://a.rtmps.youtube.com/live2",
     val youtubeStreamKey: String = "",
 )
+
+enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)
 
