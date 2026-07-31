@@ -5,6 +5,10 @@
         app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toStartOf="@id/control_panel"
         app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent">
         <androidx.camera.view.PreviewView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <FrameLayout android:id="@+id/scoreboard_preview_container" android:layout_width="240dp" android:layout_height="135dp"
+            android:layout_gravity="top|end" android:layout_margin="18dp" android:background="#000000" android:visibility="gone">
+            <androidx.camera.view.PreviewView android:id="@+id/scoreboard_preview" android:layout_width="match_parent" android:layout_height="match_parent" />
+        </FrameLayout>
         <dev.cascam.ui.CompositionOverlayView android:id="@+id/composition_overlay" android:layout_width="match_parent" android:layout_height="match_parent" />
     </FrameLayout>
 
@@ -38,6 +42,10 @@
                     <TextView style="@style/PanelText" android:text="Arraste o retângulo verde. Use dois dedos para aumentar ou diminuir o recorte 16:9." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <Button android:id="@+id/crop_larger" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="− MAIS ÁREA" />
+                        <Button android:id="@+id/crop_smaller" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="+ MENOS ÁREA" />
+                    </LinearLayout>
                     <TextView android:id="@+id/court_crop_status" style="@style/PanelHint" android:text="Zoom do recorte: 1.0×" />
                 </LinearLayout>
 

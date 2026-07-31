@@ -47,14 +47,18 @@ class CompositionOverlayView @JvmOverloads constructor(
         invalidate()
     }
     fun crop(): Triple<Float, Float, Float> = Triple(cropZoom, cropPanX, cropPanY)
+    fun changeCropZoom(delta: Float) {
+        cropZoom = (cropZoom + delta).coerceIn(1f, 8f)
+        notifyCropChanged()
+    }
     fun setScoreboardCorners(points: List<NormalizedPoint>) { require(points.size == 4); corners.clear(); corners.addAll(points); invalidate() }
     fun scoreboardCorners(): List<NormalizedPoint> = corners.toList()
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width == 0 || height == 0) return
-        if (mode != Mode.SCOREBOARD) drawCrop(canvas)
-        if (mode != Mode.COURT) drawScoreboard(canvas)
+        if (mode == Mode.COURT) drawCrop(canvas)
+        if (mode == Mode.SCOREBOARD) drawScoreboard(canvas)
     }
 
     private fun drawCrop(canvas: Canvas) {

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.View
+import android.view.Gravity
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.SeekBar
@@ -13,8 +14,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
+import androidx.camera.core.ConcurrentCamera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import dev.cascam.camera.CameraCapabilities
@@ -77,6 +80,8 @@ class MainActivity : AppCompatActivity() {
         binding.navScoreboard.setOnClickListener { showScreen(Screen.SCOREBOARD) }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { validateBroadcast() }
+        binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
+        binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
 
         binding.scoreboardZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -95,6 +100,10 @@ class MainActivity : AppCompatActivity() {
         }
         binding.courtCamera.onItemSelectedListener = cameraListener
         binding.scoreboardCamera.onItemSelectedListener = cameraListener
+        binding.scoreboardPlacement.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = positionScoreboardPreview()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     private fun showScreen(target: Screen) {
@@ -107,7 +116,11 @@ class MainActivity : AppCompatActivity() {
             Screen.COURT -> CompositionOverlayView.Mode.COURT
             Screen.SCOREBOARD -> CompositionOverlayView.Mode.SCOREBOARD
         })
-        if (hasCameraPermission()) startCamera(cameraIdFor(target))
+        binding.scoreboardPreviewContainer.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
+        if (target == Screen.BROADCAST) applyCourtTransform() else resetCourtTransform()
+        if (hasCameraPermission()) {
+            if (target == Screen.BROADCAST) startCompositionPreview() else startCamera(cameraIdFor(target))
+        }
     }
 
     private fun cameraIdFor(target: Screen): String? = when (target) {
@@ -131,6 +144,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveConfiguration() = store.save(readForm())
 
+    private fun positionScoreboardPreview() {
+        val placement = ScoreboardPlacement.entries[binding.scoreboardPlacement.selectedItemPosition]
+        val parameters = binding.scoreboardPreviewContainer.layoutParams as android.widget.FrameLayout.LayoutParams
+        parameters.gravity = when (placement) {
+            ScoreboardPlacement.TOP_LEFT -> Gravity.TOP or Gravity.START
+            ScoreboardPlacement.TOP_RIGHT -> Gravity.TOP or Gravity.END
+            ScoreboardPlacement.BOTTOM_LEFT -> Gravity.BOTTOM or Gravity.START
+            ScoreboardPlacement.BOTTOM_RIGHT -> Gravity.BOTTOM or Gravity.END
+        }
+        binding.scoreboardPreviewContainer.layoutParams = parameters
+    }
+
+    private fun applyCourtTransform() {
+        binding.preview.post {
+            val (zoom, panX, panY) = binding.compositionOverlay.crop()
+            binding.preview.scaleX = zoom
+            binding.preview.scaleY = zoom
+            binding.preview.translationX = -panX * (zoom - 1f) * binding.preview.width / 2f
+            binding.preview.translationY = -panY * (zoom - 1f) * binding.preview.height / 2f
+        }
+    }
+
+    private fun resetCourtTransform() {
+        binding.preview.scaleX = 1f; binding.preview.scaleY = 1f
+        binding.preview.translationX = 0f; binding.preview.translationY = 0f
+    }
+
     private fun validateBroadcast() {
         val configuration = readForm()
         when {
@@ -150,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
     }
     private fun applyScoreboardZoom() {
-        if (screen == Screen.SCOREBOARD) boundCamera?.let { camera ->
+        if (screen != Screen.COURT) boundCamera?.let { camera ->
             val maximum = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: scoreboardZoom()
             camera.cameraControl.setZoomRatio(scoreboardZoom().coerceAtMost(maximum))
         }
@@ -177,6 +217,45 @@ class MainActivity : AppCompatActivity() {
             applyScoreboardZoom()
         }, ContextCompat.getMainExecutor(this))
     }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun startCompositionPreview() {
+        positionScoreboardPreview()
+        val courtId = cameraIdFor(Screen.COURT) ?: return
+        val scoreboardId = cameraIdFor(Screen.SCOREBOARD) ?: return
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val provider = future.get()
+            provider.unbindAll()
+            val courtSelector = selectorFor(courtId)
+            val scoreboardSelector = selectorFor(scoreboardId)
+            val courtPreview = Preview.Builder().build().also { it.surfaceProvider = binding.preview.surfaceProvider }
+            val scoreboardPreview = Preview.Builder().build().also { it.surfaceProvider = binding.scoreboardPreview.surfaceProvider }
+            try {
+                if (courtId == scoreboardId) {
+                    boundCamera = provider.bindToLifecycle(this, courtSelector, courtPreview, scoreboardPreview)
+                } else {
+                    val configurations = listOf(
+                        ConcurrentCamera.SingleCameraConfig(courtSelector, UseCaseGroup.Builder().addUseCase(courtPreview).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(scoreboardSelector, UseCaseGroup.Builder().addUseCase(scoreboardPreview).build(), this),
+                    )
+                    val concurrent = provider.bindToLifecycle(configurations)
+                    boundCamera = concurrent.cameras.getOrNull(1)
+                }
+                binding.broadcastStatus.text = "Prévia composta ativa: crop da quadra + placar. Perspectiva do placar ainda pendente."
+                applyScoreboardZoom()
+            } catch (error: RuntimeException) {
+                binding.scoreboardPreviewContainer.visibility = View.GONE
+                boundCamera = provider.bindToLifecycle(this, courtSelector, courtPreview)
+                binding.broadcastStatus.text = "Este par não pôde ser aberto junto; mostrando somente a quadra."
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun selectorFor(cameraId: String) = CameraSelector.Builder().addCameraFilter { cameras ->
+        cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
+    }.build()
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 }

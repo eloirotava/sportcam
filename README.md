@@ -32,7 +32,11 @@ movido por arraste e redimensionado com gesto de pinça; **Placar**, onde são e
 a câmera, seu zoom e os quatro cantos; e **Ao vivo**, que reúne a composição e os
 dados do YouTube. O botão de play já valida e salva a configuração, mas ainda não
 envia vídeo: o compositor de duas entradas, encoder e cliente RTMPS continuam sendo
-a próxima entrega. A tela informa isso explicitamente para não simular uma live.
+a próxima entrega. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
+as duas fontes, aplica visualmente o crop da quadra e mostra o placar na posição
+selecionada, sem os guias de configuração. A homografia que retifica o placar ainda
+será incorporada ao compositor GPU. A tela informa o estado explicitamente para não
+simular uma live.
 
 O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
 fica nas preferências privadas do app, com backup desabilitado; uma versão de
