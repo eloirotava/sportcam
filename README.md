@@ -62,6 +62,56 @@ O botão alterna entre iniciar e encerrar a transmissão e mostra falhas de cone
 codificação na própria tela. A chave fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
 
+## Galaxy S22 e duas câmeras
+
+O S22 é capaz de manter duas câmeras ativas em cenários da própria Samsung (por
+exemplo, o Director's View), mas isso não garante que todo par de lentes esteja
+liberado para qualquer aplicativo. Para um app Camera2/CameraX, os requisitos reais
+são:
+
+1. Android anunciar `FEATURE_CAMERA_CONCURRENT`;
+2. o par de IDs lógicos constar em `CameraManager.concurrentCameraIds`;
+3. o mesmo grupo aparecer em `ProcessCameraProvider.availableConcurrentCameraInfos`;
+4. resolução, formato e quantidade de use cases caberem na combinação de streams que
+   o HAL aceita simultaneamente.
+
+O diagnóstico da tela agora mostra separadamente esses três primeiros níveis. Se o
+S22 mostra `0 + 1` e `0 + 3` tanto no Camera2 quanto no CameraX, há suporte público do
+HAL para esses pares lógicos; uma imagem duplicada nesse caso indica problema no
+binding/configuração dos use cases, e não ausência genérica de multicâmera. Sensores
+físicos internos à mesma câmera lógica continuam sendo outro caso e não devem ser
+confundidos com os pares lógicos concorrentes.
+
+Referências: [CameraX — câmera concorrente](https://developer.android.com/media/camera/camerax/configuration#concurrent-camera),
+[`CameraManager.getConcurrentCameraIds`](https://developer.android.com/reference/android/hardware/camera2/CameraManager#getConcurrentCameraIds())
+e [Samsung Director's View](https://www.samsung.com/us/support/answer/ANS00088122/).
+
+## HLS direto para o YouTube
+
+O YouTube também aceita **HLS como protocolo de ingestão**, além de RTMPS. Não se
+trata de servir a playlist pelo celular para espectadores: o encoder deve enviar por
+HTTP a playlist e os segmentos ao endpoint de upload HLS fornecido pelo YouTube
+Studio. O fluxo planejado para o CasCam é:
+
+1. selecionar **HLS** como protocolo da transmissão no YouTube Studio e copiar a URL
+   de ingestão/chave gerada para aquela live;
+2. reutilizar os H.264/AAC já produzidos pelo app;
+3. multiplexar os pacotes em MPEG-TS, preservando PTS/DTS;
+4. fechar segmentos curtos, inicialmente de 2 segundos, sempre começando em um
+   keyframe;
+5. gerar e atualizar uma media playlist HLS com sequência crescente;
+6. fazer upload HTTP dos segmentos e da playlist para o prefixo indicado pelo Studio,
+   com repetição segura, descarte de arquivos antigos e reconexão.
+
+HLS aumenta a latência e exige um segmentador MPEG-TS, gerenciador de playlist e
+uploader resiliente; portanto não é apenas trocar `rtmps://` por `https://`. A
+composição e os encoders atuais podem ser reaproveitados, enquanto a camada
+`RtmpClient` será substituída por esse muxer/uploader. A URL HLS deve vir do Studio —
+o endpoint RTMPS atual não aceita playlists ou segmentos.
+
+Referências: [YouTube — HLS ingestion protocol](https://support.google.com/youtube/answer/10349430)
+e [configurações recomendadas de encoder](https://support.google.com/youtube/answer/2853702).
+
 ## Rodando
 
 1. Abra o diretório no Android Studio.

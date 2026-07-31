@@ -219,6 +219,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @ExperimentalCamera2Interop
     private fun showCapabilities() {
         val logicalPairs = capabilities.concurrentPairs
             .map { pair -> pair.sorted().joinToString(" + ") }
@@ -229,14 +230,28 @@ class MainActivity : AppCompatActivity() {
             .mapNotNull { (logical, cameras) ->
                 cameras.takeIf { it.size > 1 }?.joinToString(prefix = "$logical: ", separator = ", ") { it.id }
             }
-        binding.cameraStatus.text = buildString {
+        val platformFeature = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
+        val camera2Summary = buildString {
             append("${capabilities.cameras.size} opções detectadas")
+            append("\nFEATURE_CAMERA_CONCURRENT: ${if (platformFeature) "sim" else "não"}")
             append(if (logicalPairs.isEmpty()) "\nPares simultâneos declarados: nenhum" else "\nPares simultâneos declarados: ${logicalPairs.joinToString("; ")}")
             if (physicalGroups.isNotEmpty()) {
                 append("\nSensores físicos por câmera lógica: ${physicalGroups.joinToString("; ")}")
                 append("\nSensores do mesmo grupo só funcionam juntos se o HAL aceitar dois fluxos físicos.")
             }
         }
+        binding.cameraStatus.text = camera2Summary
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val cameraXGroups = future.get().availableConcurrentCameraInfos.map { group ->
+                group.map { Camera2CameraInfo.from(it).cameraId }.sorted().joinToString(" + ")
+            }.distinct().sorted()
+            binding.cameraStatus.text = camera2Summary + if (cameraXGroups.isEmpty()) {
+                "\nPares oferecidos pelo CameraX: nenhum"
+            } else {
+                "\nPares oferecidos pelo CameraX: ${cameraXGroups.joinToString("; ")}"
+            }
+        }, ContextCompat.getMainExecutor(this))
     }
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     private fun requestCameraIfNeeded() {
