@@ -3,6 +3,7 @@ package dev.cascam
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Size
 import android.view.View
 import android.view.WindowManager
 import android.widget.AdapterView
@@ -20,6 +21,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import dev.cascam.camera.CameraCapabilities
@@ -327,8 +330,8 @@ class MainActivity : AppCompatActivity() {
                     val advertisedCourt = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == courtInfo.logicalCameraId }
                     val advertisedScoreboard = advertisedGroup.first { Camera2CameraInfo.from(it).cameraId == scoreboardInfo.logicalCameraId }
                     val configurations = listOf(
-                        ConcurrentCamera.SingleCameraConfig(selectorFor(advertisedCourt), UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
-                        ConcurrentCamera.SingleCameraConfig(selectorFor(advertisedScoreboard), UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedCourt).cameraId), UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
+                        ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(advertisedScoreboard).cameraId), UseCaseGroup.Builder().addUseCase(scoreboardAnalysis).build(), this),
                     )
                     val concurrent = provider.bindToLifecycle(configurations)
                     boundCamera = concurrent.cameras.getOrNull(1)
@@ -340,8 +343,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 applyScoreboardZoom()
             } catch (error: RuntimeException) {
+                provider.unbindAll()
                 boundCamera = provider.bindToLifecycle(this, courtSelector, courtAnalysis)
-                binding.broadcastStatus.text = "Incompatível com duas fontes ($sourceDescription): ${error.message}. Somente quadra."
+                val reason = generateSequence<Throwable>(error) { it.cause }.last()
+                    .let { "${it.javaClass.simpleName}: ${it.message}" }
+                binding.broadcastStatus.text = "Incompatível com duas fontes ($sourceDescription): $reason. Somente quadra."
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -351,12 +357,14 @@ class MainActivity : AppCompatActivity() {
         cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
     }.build()
 
-    private fun selectorFor(cameraInfo: androidx.camera.core.CameraInfo) =
-        CameraSelector.Builder().addCameraFilter { cameras -> cameras.filter { it === cameraInfo } }.build()
-
     @ExperimentalCamera2Interop
     private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {
-        val builder = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        val resolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(
+            ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER),
+        ).build()
+        val builder = ImageAnalysis.Builder()
+            .setResolutionSelector(resolutionSelector)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         camera.physicalCameraId?.let { Camera2Interop.Extender(builder).setPhysicalCameraId(it) }
         return builder.build()
     }

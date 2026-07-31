@@ -93,6 +93,10 @@ trata de servir a playlist pelo celular para espectadores: o encoder deve enviar
 HTTP a playlist e os segmentos ao endpoint de upload HLS fornecido pelo YouTube
 Studio. O fluxo planejado para o CasCam é:
 
+> **Estado atual:** o aplicativo ainda publica somente por RTMPS. Esta seção descreve
+> a implementação HLS planejada; ainda não há muxer MPEG-TS, playlist nem uploader HLS
+> no código.
+
 1. selecionar **HLS** como protocolo da transmissão no YouTube Studio e copiar a URL
    de ingestão/chave gerada para aquela live;
 2. reutilizar os H.264/AAC já produzidos pelo app;

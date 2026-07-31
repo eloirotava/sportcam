@@ -26,6 +26,7 @@
             <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content">
                 <LinearLayout android:id="@+id/panel_broadcast" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
                     <TextView style="@style/PanelTitle" android:text="Composição e transmissão" />
+                    <TextView style="@style/PanelHint" android:text="Transporte atual: RTMPS. HLS está planejado, mas ainda não foi implementado no aplicativo." />
                     <TextView style="@style/PanelText" android:text="Confira o enquadramento verde e a área amarela do placar antes de entrar ao vivo." />
                     <TextView style="@style/PanelLabel" android:text="Servidor do YouTube" />
                     <EditText android:id="@+id/youtube_server" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:textColor="#FFFFFF" android:singleLine="true" />
