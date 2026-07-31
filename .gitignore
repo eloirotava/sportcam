@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+build/
+**/build/
+local.properties
+*.iml
+captures/
+# Ferramentas geradas/baixadas localmente não fazem parte do código-fonte.
+.cascam-env
+gradlew
+gradlew.bat
+gradle/wrapper/gradle-wrapper.jar

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#090D12">
+
+    <FrameLayout
+        android:id="@+id/preview_container"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_margin="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/control_panel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+        <androidx.camera.view.PreviewView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+        <dev.cascam.ui.CompositionOverlayView
+            android:id="@+id/composition_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <ScrollView
+        android:id="@+id/control_panel"
+        android:layout_width="320dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp"
+            android:orientation="vertical">
+            <TextView style="@style/PanelTitle" android:text="CasCam · CONFIGURAÇÃO" />
+            <TextView
+                android:id="@+id/camera_status"
+                style="@style/PanelText"
+                android:text="Inspecionando câmeras…" />
+
+            <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
+            <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
+            <TextView style="@style/PanelLabel" android:text="Câmera do placar" />
+            <Spinner android:id="@+id/scoreboard_camera" android:layout_width="match_parent" android:layout_height="48dp" />
+
+            <TextView style="@style/PanelLabel" android:text="Zoom do recorte 16:9" />
+            <SeekBar android:id="@+id/crop_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
+            <TextView style="@style/PanelLabel" android:text="Mover recorte na horizontal" />
+            <SeekBar android:id="@+id/crop_pan_x" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="200" android:progress="100" />
+            <TextView style="@style/PanelLabel" android:text="Mover recorte na vertical" />
+            <SeekBar android:id="@+id/crop_pan_y" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="200" android:progress="100" />
+
+            <TextView style="@style/PanelLabel" android:text="Posição do placar na transmissão" />
+            <Spinner android:id="@+id/scoreboard_placement" android:layout_width="match_parent" android:layout_height="48dp" />
+            <TextView style="@style/PanelHint" android:text="Na imagem, arraste os 4 pontos amarelos até os cantos do placar." />
+
+            <TextView style="@style/PanelLabel" android:text="Servidor de ingestão do YouTube" />
+            <EditText
+                android:id="@+id/youtube_server"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:textColor="#FFFFFF"
+                android:singleLine="true" />
+            <TextView style="@style/PanelLabel" android:text="Chave da transmissão" />
+            <EditText
+                android:id="@+id/youtube_key"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="xxxx-xxxx-xxxx-xxxx"
+                android:inputType="textPassword"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#718191"
+                android:singleLine="true" />
+            <TextView style="@style/PanelHint" android:text="A chave fica somente neste aparelho. Não compartilhe capturas desta tela." />
+
+            <Button
+                android:id="@+id/save_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Salvar configuração" />
+            <Button
+                android:id="@+id/start_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Testar composição" />
+            <TextView style="@style/PanelHint" android:text="O primeiro pipeline será RTMPS. A saída HLS será avaliada na etapa seguinte." />
+        </LinearLayout>
+    </ScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>
