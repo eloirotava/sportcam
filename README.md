@@ -19,7 +19,8 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - projeto Android nativo (Kotlin, minSdk 31);
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
-- área de captura do placar e destino na composição com duas alças diagonais cada;
+- quadrilátero de quatro pontos para capturar/planificar o placar e retângulo de duas
+  alças para seu destino na composição;
 - seleção independente da câmera da quadra e do placar, incluindo lentes traseiras,
   frontais e externas anunciadas pelo Android;
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
@@ -39,7 +40,8 @@ as duas fontes, converte os frames YUV, faz o crop real da quadra e aplica a hom
 dos quatro pontos do placar para retificá-lo no PiP, sem os guias de configuração.
 Esta primeira composição é desenhada na CPU para validar o resultado no aparelho; a
 versão GPU será necessária para alimentar o encoder com desempenho sustentado. A tela
-informa o estado explicitamente para não simular uma live.
+informa o estado explicitamente para não simular uma live e permanece ligada durante
+o uso, sem depender de toques periódicos.
 
 Os seletores distinguem câmeras **lógicas** e sensores **físicos** anunciados dentro
 delas. Isso evita que ultra-wide e principal acabem resolvendo para a mesma câmera

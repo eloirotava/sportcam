@@ -50,7 +50,7 @@
 
                 <LinearLayout android:id="@+id/panel_scoreboard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar placar" />
-                    <TextView style="@style/PanelText" android:text="Amarelo: área capturada na câmera. Azul: tamanho e posição na composição. Arraste dentro para mover ou use as duas bolinhas diagonais para redimensionar." />
+                    <TextView style="@style/PanelText" android:text="Amarelo: ajuste os quatro cantos do placar inclinado; ele será planificado. Azul: ajuste o retângulo de tamanho e posição na composição pelas duas bolinhas diagonais." />
                     <TextView style="@style/PanelLabel" android:text="Câmera do placar" />
                     <Spinner android:id="@+id/scoreboard_camera" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Zoom óptico/digital da câmera" />

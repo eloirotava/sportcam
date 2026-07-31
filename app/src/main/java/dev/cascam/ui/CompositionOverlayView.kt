@@ -82,7 +82,7 @@ class CompositionOverlayView @JvmOverloads constructor(
         corners.forEachIndexed { index, point ->
             val x = point.x * width; val y = point.y * height
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            if (index == 0 || index == 2) canvas.drawCircle(x, y, 14f, handlePaint)
+            canvas.drawCircle(x, y, 14f, handlePaint)
         }
         path.close(); canvas.drawPath(path, quadPaint)
         canvas.drawRect(
@@ -139,7 +139,7 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun notifyCropChanged() { invalidate(); onCropChanged?.invoke(cropZoom, cropPanX, cropPanY) }
-    private fun nearestCorner(x: Float, y: Float): Int? = listOf(0, 2).minByOrNull { i ->
+    private fun nearestCorner(x: Float, y: Float): Int? = corners.indices.minByOrNull { i ->
         val dx = x - corners[i].x * width; val dy = y - corners[i].y * height; dx * dx + dy * dy
     }?.takeIf { i -> distanceSquared(x, y, corners[i].x * width, corners[i].y * height) <= 56f * 56f }
 
@@ -182,24 +182,45 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun resizeScoreboard(corner: Int, x: Float, y: Float) {
-        val moving = normalized(x, y)
-        val fixed = corners[if (corner == 0) 2 else 0]
-        val left = minOf(moving.x, fixed.x); val right = maxOf(moving.x, fixed.x)
-        val top = minOf(moving.y, fixed.y); val bottom = maxOf(moving.y, fixed.y)
-        if (right - left < .02f || bottom - top < .02f) return
-        corners[0] = NormalizedPoint(left, top)
-        corners[1] = NormalizedPoint(right, top)
-        corners[2] = NormalizedPoint(right, bottom)
-        corners[3] = NormalizedPoint(left, bottom)
+        val previous = corners[corner]
+        corners[corner] = normalized(x, y)
+        if (!isValidScoreboard()) corners[corner] = previous
         invalidate()
     }
 
     private fun insideScoreboard(x: Float, y: Float): Boolean =
-        x / width in corners[0].x..corners[2].x && y / height in corners[0].y..corners[2].y
+        android.graphics.Region().apply {
+            val path = Path().apply {
+                corners.forEachIndexed { index, point ->
+                    val px = point.x * this@CompositionOverlayView.width
+                    val py = point.y * this@CompositionOverlayView.height
+                    if (index == 0) moveTo(px, py) else lineTo(px, py)
+                }
+                close()
+            }
+            setPath(path, android.graphics.Region(0, 0, this@CompositionOverlayView.width, this@CompositionOverlayView.height))
+        }.contains(x.toInt(), y.toInt())
+
+    private fun scoreboardArea(): Float = corners.indices.sumOf { index ->
+        val current = corners[index]
+        val next = corners[(index + 1) % corners.size]
+        (current.x * next.y - next.x * current.y).toDouble()
+    }.toFloat() / 2f
+
+    private fun isValidScoreboard(): Boolean {
+        if (kotlin.math.abs(scoreboardArea()) < .001f) return false
+        val crosses = corners.indices.map { index ->
+            val a = corners[index]
+            val b = corners[(index + 1) % corners.size]
+            val c = corners[(index + 2) % corners.size]
+            (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+        }
+        return crosses.all { it > .0001f } || crosses.all { it < -.0001f }
+    }
 
     private fun moveScoreboard(dx: Float, dy: Float) {
-        val normalizedDx = (dx / width).coerceIn(-corners[0].x, 1f - corners[2].x)
-        val normalizedDy = (dy / height).coerceIn(-corners[0].y, 1f - corners[2].y)
+        val normalizedDx = (dx / width).coerceIn(-corners.minOf { it.x }, 1f - corners.maxOf { it.x })
+        val normalizedDy = (dy / height).coerceIn(-corners.minOf { it.y }, 1f - corners.maxOf { it.y })
         corners.indices.forEach { index ->
             corners[index] = NormalizedPoint(corners[index].x + normalizedDx, corners[index].y + normalizedDy)
         }
