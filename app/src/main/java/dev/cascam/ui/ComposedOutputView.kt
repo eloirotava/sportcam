@@ -52,7 +52,9 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
 
     private fun drawScoreboard(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration) {
         val overlayWidth = width * .32f
-        val overlayHeight = overlayWidth * 9f / 16f
+        val selectedWidth = (config.scoreboardCorners[1].x - config.scoreboardCorners[0].x) * bitmap.width
+        val selectedHeight = (config.scoreboardCorners[3].y - config.scoreboardCorners[0].y) * bitmap.height
+        val overlayHeight = (overlayWidth * selectedHeight / selectedWidth).coerceAtMost(height * .45f)
         val margin = width * .025f
         val left = if (config.scoreboardPlacement == ScoreboardPlacement.TOP_LEFT || config.scoreboardPlacement == ScoreboardPlacement.BOTTOM_LEFT) margin else width - overlayWidth - margin
         val top = if (config.scoreboardPlacement == ScoreboardPlacement.TOP_LEFT || config.scoreboardPlacement == ScoreboardPlacement.TOP_RIGHT) margin else height - overlayHeight - margin

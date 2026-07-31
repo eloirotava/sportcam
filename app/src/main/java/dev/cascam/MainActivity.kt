@@ -191,13 +191,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCapabilities() {
-        val concurrent = if (capabilities.supportsConcurrentCameras) "par simultâneo disponível" else "sem par simultâneo"
-        binding.cameraStatus.text = "${capabilities.cameras.size} câmeras · $concurrent"
+        val logicalPairs = capabilities.concurrentPairs
+            .map { pair -> pair.sorted().joinToString(" + ") }
+            .sorted()
+        val physicalGroups = capabilities.cameras
+            .filter { it.physicalCameraId != null }
+            .groupBy { it.logicalCameraId }
+            .mapNotNull { (logical, cameras) ->
+                cameras.takeIf { it.size > 1 }?.joinToString(prefix = "$logical: ", separator = ", ") { it.id }
+            }
+        binding.cameraStatus.text = buildString {
+            append("${capabilities.cameras.size} opções detectadas")
+            append(if (logicalPairs.isEmpty()) "\nPares simultâneos declarados: nenhum" else "\nPares simultâneos declarados: ${logicalPairs.joinToString("; ")}")
+            if (physicalGroups.isNotEmpty()) {
+                append("\nSensores físicos por câmera lógica: ${physicalGroups.joinToString("; ")}")
+                append("\nSensores do mesmo grupo só funcionam juntos se o HAL aceitar dois fluxos físicos.")
+            }
+        }
     }
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     private fun requestCameraIfNeeded() { if (!hasCameraPermission()) permissionLauncher.launch(Manifest.permission.CAMERA) }
 
-    @OptIn(ExperimentalCamera2Interop::class)
+    @ExperimentalCamera2Interop
     private fun startCamera(cameraKey: String?) {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -213,7 +228,7 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
+    @ExperimentalCamera2Interop
     private fun startCompositionPreview() {
         repeatedFrameCount.set(0)
         distinctSourcesConfirmed.set(false)
@@ -281,12 +296,12 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
+    @ExperimentalCamera2Interop
     private fun selectorFor(cameraId: String) = CameraSelector.Builder().addCameraFilter { cameras ->
         cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
     }.build()
 
-    @OptIn(ExperimentalCamera2Interop::class)
+    @ExperimentalCamera2Interop
     private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {
         val builder = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
         camera.physicalCameraId?.let { Camera2Interop.Extender(builder).setPhysicalCameraId(it) }

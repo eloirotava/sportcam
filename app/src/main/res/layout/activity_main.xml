@@ -2,8 +2,8 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent" android:background="#090D12">
     <FrameLayout android:id="@+id/preview_container" android:layout_width="0dp" android:layout_height="0dp" android:layout_margin="12dp"
-        app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toStartOf="@id/control_panel"
-        app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintDimensionRatio="16:9" app:layout_constraintEnd_toStartOf="@id/control_panel"
+        app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent">
         <androidx.camera.view.PreviewView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="match_parent" />
         <dev.cascam.ui.ComposedOutputView android:id="@+id/composed_output" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
         <FrameLayout android:id="@+id/scoreboard_preview_container" android:layout_width="240dp" android:layout_height="135dp"
@@ -40,7 +40,7 @@
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar quadra" />
-                    <TextView style="@style/PanelText" android:text="Arraste o retângulo verde. Use dois dedos para aumentar ou diminuir o recorte 16:9." />
+                    <TextView style="@style/PanelText" android:text="Arraste o retângulo verde para mover. Arraste uma das duas bolinhas diagonais para redimensionar; a saída permanece 16:9." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
@@ -52,7 +52,7 @@
 
                 <LinearLayout android:id="@+id/panel_scoreboard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar placar" />
-                    <TextView style="@style/PanelText" android:text="Arraste os quatro pontos amarelos até os cantos do placar." />
+                    <TextView style="@style/PanelText" android:text="Arraste dentro do retângulo para mover. Arraste uma das duas bolinhas diagonais para ajustar livremente o tamanho, sem impor proporção." />
                     <TextView style="@style/PanelLabel" android:text="Câmera do placar" />
                     <Spinner android:id="@+id/scoreboard_camera" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Zoom óptico/digital da câmera" />
