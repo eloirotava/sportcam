@@ -4,12 +4,20 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.util.Size
 import kotlin.math.atan
 import kotlin.math.max
 
 enum class LensFacing(val label: String) {
     BACK("traseira"), FRONT("frontal"), EXTERNAL("externa"), UNKNOWN("desconhecida"),
+}
+
+/** Como pedir zoom de um sensor físico sem afetar o outro da mesma câmera lógica. */
+enum class PerPhysicalZoom(val label: String) {
+    ZOOM_RATIO("por CONTROL_ZOOM_RATIO"),
+    CROP_REGION("por SCALER_CROP_REGION"),
+    NONE("não suportado"),
 }
 
 data class CameraInfo(
@@ -23,6 +31,11 @@ data class CameraInfo(
     val maximumYuvSize: Size? = null,
     val hardwareLevel: String = "?",
     val logicalMultiCamera: Boolean = false,
+    /**
+     * Se o HAL aceita ajustar zoom por sensor físico dentro de uma sessão só. Sem isso o zoom
+     * vale para a câmera lógica inteira e mexer no placar mexeria também na quadra.
+     */
+    val perPhysicalZoom: PerPhysicalZoom = PerPhysicalZoom.NONE,
 ) {
     val isPhysical: Boolean get() = physicalCameraId != null
 
@@ -77,6 +90,7 @@ object CameraCapabilitiesReader {
                 id, id, null,
                 characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                 facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), level, multiCamera,
+                perPhysicalZoom(characteristics),
             )
             val physical = characteristics.physicalCameraIds.map { physicalId ->
                 val physicalCharacteristics = manager.getCameraCharacteristics(physicalId)
@@ -95,6 +109,19 @@ object CameraCapabilitiesReader {
             .filter { it.size >= 2 }
             .toSet()
         return CameraCapabilities(cameras, pairs)
+    }
+
+    /**
+     * Chaves que o HAL aceita sobrescrever por sensor físico dentro do mesmo request. É o que
+     * decide se dá para dar zoom só no placar sem arrastar o enquadramento da quadra junto.
+     */
+    private fun perPhysicalZoom(characteristics: CameraCharacteristics): PerPhysicalZoom {
+        val keys = runCatching { characteristics.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
+        return when {
+            keys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> PerPhysicalZoom.ZOOM_RATIO
+            keys.contains(CaptureRequest.SCALER_CROP_REGION) -> PerPhysicalZoom.CROP_REGION
+            else -> PerPhysicalZoom.NONE
+        }
     }
 
     private fun hardwareLevel(characteristics: CameraCharacteristics) =

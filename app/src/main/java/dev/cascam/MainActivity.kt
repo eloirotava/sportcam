@@ -5,9 +5,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.hardware.camera2.CameraManager
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
+import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -33,6 +35,7 @@ import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraCapabilitiesReader
 import dev.cascam.camera.CameraInfo
 import dev.cascam.camera.CameraXSupport
+import dev.cascam.camera.DualCameraEngine
 import dev.cascam.camera.DualCameraProbe
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
@@ -72,11 +75,12 @@ class MainActivity : AppCompatActivity() {
     private var probe: DualCameraProbe? = null
     private var probeReport: String = ""
     private var ingestion: YoutubeLiveApi.Ingestion? = null
+    private var dualCameraEngine: DualCameraEngine? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.CAMERA] == true || hasCameraPermission()) showScreen(screen)
-        else binding.cameraStatus.text = "Permissão da câmera necessária"
+        else toast("Permissão da câmera necessária")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,7 +93,6 @@ class MainActivity : AppCompatActivity() {
         capabilities = CameraCapabilitiesReader.read(this)
         configureForm(store.load())
         configureActions()
-        showCapabilities()
         showScreen(Screen.BROADCAST)
         requestCameraIfNeeded()
     }
@@ -188,6 +191,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScreen(target: Screen) {
         if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
+        if (target != Screen.BROADCAST) dualCameraEngine?.stop()
         if (target != Screen.DIAGNOSTICS) stopProbe()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
@@ -468,46 +472,16 @@ class MainActivity : AppCompatActivity() {
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
     }
     private fun applyScoreboardZoom() {
+        dualCameraEngine?.takeIf { it.isRunning }?.let { engine ->
+            engine.setScoreboardZoom(scoreboardZoom())
+            return
+        }
         if (screen != Screen.COURT) boundCamera?.let { camera ->
             val maximum = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: scoreboardZoom()
             camera.cameraControl.setZoomRatio(scoreboardZoom().coerceAtMost(maximum))
         }
     }
 
-    @ExperimentalCamera2Interop
-    private fun showCapabilities() {
-        val logicalPairs = capabilities.concurrentPairs
-            .map { pair -> pair.sorted().joinToString(" + ") }
-            .sorted()
-        val physicalGroups = capabilities.cameras
-            .filter { it.physicalCameraId != null }
-            .groupBy { it.logicalCameraId }
-            .mapNotNull { (logical, cameras) ->
-                cameras.takeIf { it.size > 1 }?.joinToString(prefix = "$logical: ", separator = ", ") { it.id }
-            }
-        val platformFeature = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_CONCURRENT)
-        val camera2Summary = buildString {
-            append("${capabilities.cameras.size} opções detectadas")
-            append("\nFEATURE_CAMERA_CONCURRENT: ${if (platformFeature) "sim" else "não"}")
-            append(if (logicalPairs.isEmpty()) "\nPares simultâneos declarados: nenhum" else "\nPares simultâneos declarados: ${logicalPairs.joinToString("; ")}")
-            if (physicalGroups.isNotEmpty()) {
-                append("\nSensores físicos por câmera lógica: ${physicalGroups.joinToString("; ")}")
-                append("\nSensores do mesmo grupo só funcionam juntos se o HAL aceitar dois fluxos físicos.")
-            }
-        }
-        binding.cameraStatus.text = camera2Summary
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            val cameraXGroups = future.get().availableConcurrentCameraInfos.map { group ->
-                group.map { Camera2CameraInfo.from(it).cameraId }.sorted().joinToString(" + ")
-            }.distinct().sorted()
-            binding.cameraStatus.text = camera2Summary + if (cameraXGroups.isEmpty()) {
-                "\nPares oferecidos pelo CameraX: nenhum"
-            } else {
-                "\nPares oferecidos pelo CameraX: ${cameraXGroups.joinToString("; ")}"
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
     private fun requestCameraIfNeeded() {
         val missing = listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).filter {
@@ -542,6 +516,7 @@ class MainActivity : AppCompatActivity() {
         val scoreboardKey = cameraIdFor(Screen.SCOREBOARD) ?: return
         val courtInfo = cameraFor(courtKey) ?: return
         val scoreboardInfo = cameraFor(scoreboardKey) ?: return
+        if (startDualSensorCapture(courtInfo, scoreboardInfo)) return
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
@@ -604,6 +579,39 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    /**
+     * Caminho preferido para quadra + placar: dois sensores físicos da mesma câmera lógica por
+     * Camera2. Devolve false quando o par escolhido não é desses, e aí a composição segue pelo
+     * CameraX como antes.
+     */
+    private fun startDualSensorCapture(court: CameraInfo, scoreboard: CameraInfo): Boolean {
+        val engine = dualCameraEngine ?: DualCameraEngine(
+            manager = getSystemService(CameraManager::class.java),
+            onFrame = { role, bitmap ->
+                when (role) {
+                    DualCameraEngine.Role.COURT -> binding.composedOutput.submitCourt(bitmap)
+                    DualCameraEngine.Role.SCOREBOARD -> binding.composedOutput.submitScoreboard(bitmap)
+                }
+            },
+            onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
+        ).also { dualCameraEngine = it }
+        val plan = engine.planFor(capabilities, court, scoreboard, DUAL_SENSOR_CEILING) ?: return false
+        // Só abrir a lógica depois que o CameraX largou, senão o openCamera volta com CAMERA_IN_USE.
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            runCatching { future.get().unbindAll() }
+            engine.start(plan, displayRotationDegrees(), scoreboardZoom())
+        }, ContextCompat.getMainExecutor(this))
+        return true
+    }
+
+    private fun displayRotationDegrees() = when (display?.rotation) {
+        Surface.ROTATION_90 -> 90
+        Surface.ROTATION_180 -> 180
+        Surface.ROTATION_270 -> 270
+        else -> 0
+    }
+
     @ExperimentalCamera2Interop
     private fun selectorFor(cameraId: String) = CameraXSupport.selectorFor(cameraId)
 
@@ -647,6 +655,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         probe?.shutdown()
         probe = null
+        dualCameraEngine?.release()
+        dualCameraEngine = null
         stopBroadcast()
         stopService(Intent(this, BroadcastService::class.java))
         broadcastLifecycle.stop()
@@ -662,5 +672,10 @@ class MainActivity : AppCompatActivity() {
         override val lifecycle: Lifecycle get() = registry
         fun start() { registry.currentState = Lifecycle.State.RESUMED }
         fun stop() { registry.currentState = Lifecycle.State.DESTROYED }
+    }
+
+    private companion object {
+        /** Teto de captura dos dois sensores; o teste confirmou 1920x1080 neste aparelho. */
+        val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
     }
 }

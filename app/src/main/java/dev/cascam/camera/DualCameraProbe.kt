@@ -351,6 +351,7 @@ class DualCameraProbe(
         capabilities.cameras.filter { !it.isPhysical }.forEach { logical ->
             appendLine("  [${logical.id}] ${logical.describe}")
             appendLine("       nível ${logical.hardwareLevel}${if (logical.logicalMultiCamera) " · LOGICAL_MULTI_CAMERA" else ""}")
+            if (logical.logicalMultiCamera) appendLine("       zoom independente por sensor: ${logical.perPhysicalZoom.label}")
             capabilities.cameras.filter { it.isPhysical && it.logicalCameraId == logical.id }.forEach {
                 appendLine("       └ ${it.describe}")
             }
