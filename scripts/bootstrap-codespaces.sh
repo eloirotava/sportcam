@@ -34,7 +34,18 @@ if [[ ! -x "$gradle_home/bin/gradle" ]]; then
   unzip -q "$work_dir/gradle.zip" -d "$HOME/.local"
 fi
 
-java_home="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+# Codespaces pode trazer um Java muito novo como padrão (por exemplo 25.0.2).
+# AGP 8.9.1 deve rodar no JDK 17. Não derive JAVA_HOME de `command -v javac`, pois
+# isso escolheria o Java global do Codespace em vez do pacote instalado acima.
+java_home="/usr/lib/jvm/java-17-openjdk-amd64"
+if [[ ! -x "$java_home/bin/java" ]]; then
+  java_binary="$(dpkg -L openjdk-17-jdk-headless | grep '/bin/java$' | head -n 1)"
+  java_home="$(dirname "$(dirname "$java_binary")")"
+fi
+if [[ "$($java_home/bin/java -version 2>&1 | head -n 1)" != *'17.'* ]]; then
+  echo "Não foi possível selecionar o JDK 17 em $java_home" >&2
+  exit 1
+fi
 export JAVA_HOME="$java_home"
 export ANDROID_HOME="$android_home"
 export PATH="$gradle_home/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
@@ -48,7 +59,11 @@ export ANDROID_HOME="$ANDROID_HOME"
 export PATH="$gradle_home/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH"
 EOF
 
+# Um daemon iniciado anteriormente com Java 25 não deve ser reaproveitado.
+"$gradle_home/bin/gradle" --stop >/dev/null 2>&1 || true
+
 echo
 echo "Ferramentas instaladas fora do repositório. Agora execute:"
 echo "  source .cascam-env"
+echo "  java -version  # deve mostrar 17"
 echo "  gradle assembleDebug"

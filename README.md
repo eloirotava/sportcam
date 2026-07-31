@@ -71,6 +71,23 @@ compilar. Para baixar o APK, abra a aba **Explorer** do Codespaces, navegue até
 **Download**. A primeira compilação precisa de acesso à internet para baixar o SDK,
 o Gradle e as dependências Maven.
 
+Se o Gradle falhar mostrando apenas uma versão como `25.0.2`, o Codespace selecionou
+seu Java global, que é novo demais para o Android Gradle Plugin utilizado. Atualize o
+repositório e rode novamente o bootstrap; ele fixa `JAVA_HOME` no OpenJDK 17 e encerra
+qualquer daemon que tenha sido iniciado com Java 25. Confirme antes do build:
+
+```bash
+./scripts/bootstrap-codespaces.sh
+source .cascam-env
+java -version
+gradle --stop
+gradle assembleDebug
+```
+
+A primeira linha de `java -version` deve começar com `openjdk version "17`. Os avisos
+sobre `System::load`/`--enable-native-access` vinham do Gradle rodando no Java 25 e
+não impediam o build por si só; o erro era a versão incompatível da JVM.
+
 Se preferir executar cada etapa manualmente, abra
 `scripts/bootstrap-codespaces.sh`: ele contém os comandos completos, sem esconder a
 instalação em uma imagem ou binário do repositório.
