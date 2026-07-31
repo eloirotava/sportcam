@@ -5,6 +5,7 @@
         app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toStartOf="@id/control_panel"
         app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent">
         <androidx.camera.view.PreviewView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="match_parent" />
+        <dev.cascam.ui.ComposedOutputView android:id="@+id/composed_output" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
         <FrameLayout android:id="@+id/scoreboard_preview_container" android:layout_width="240dp" android:layout_height="135dp"
             android:layout_gravity="top|end" android:layout_margin="18dp" android:background="#000000" android:visibility="gone">
             <androidx.camera.view.PreviewView android:id="@+id/scoreboard_preview" android:layout_width="match_parent" android:layout_height="match_parent" />
