@@ -39,6 +39,12 @@ Esta primeira composição é desenhada na CPU para validar o resultado no apare
 versão GPU será necessária para alimentar o encoder com desempenho sustentado. A tela
 informa o estado explicitamente para não simular uma live.
 
+Os seletores distinguem câmeras **lógicas** e sensores **físicos** anunciados dentro
+delas. Isso evita que ultra-wide e principal acabem resolvendo para a mesma câmera
+lógica no S22. Quando dois sensores físicos pertencem à mesma câmera lógica, cada
+`ImageAnalysis` recebe explicitamente seu `physicalCameraId`; para frontal + traseira,
+o app usa o par concorrente de câmeras lógicas.
+
 O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
 fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.

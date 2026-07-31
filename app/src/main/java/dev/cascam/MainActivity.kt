@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.ConcurrentCamera
@@ -22,6 +23,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraCapabilitiesReader
+import dev.cascam.camera.CameraInfo
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.config.ScoreboardPlacement
@@ -62,7 +64,7 @@ class MainActivity : AppCompatActivity() {
     private fun configureForm(configuration: BroadcastConfiguration) {
         cameraIds = capabilities.cameras.map { it.id }
         val labels = capabilities.cameras.map {
-            "ID ${it.id} · ${it.lensFacing.label} · ${it.minimumFocalLength?.let { focal -> "$focal mm" } ?: "focal ?"}"
+            "${if (it.physicalCameraId == null) "Lógica" else "Física"} ${it.id} · ${it.lensFacing.label} · ${it.minimumFocalLength?.let { focal -> "$focal mm" } ?: "focal ?"}"
         }
         binding.courtCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         binding.scoreboardCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
@@ -190,14 +192,15 @@ class MainActivity : AppCompatActivity() {
     private fun requestCameraIfNeeded() { if (!hasCameraPermission()) permissionLauncher.launch(Manifest.permission.CAMERA) }
 
     @OptIn(ExperimentalCamera2Interop::class)
-    private fun startCamera(cameraId: String?) {
+    private fun startCamera(cameraKey: String?) {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
-            val selector = cameraId?.let { requestedId ->
-                CameraSelector.Builder().addCameraFilter { cameras -> cameras.filter { Camera2CameraInfo.from(it).cameraId == requestedId } }.build()
-            } ?: CameraSelector.DEFAULT_BACK_CAMERA
-            val preview = Preview.Builder().build().also { it.surfaceProvider = binding.preview.surfaceProvider }
+            val camera = cameraKey?.let(::cameraFor)
+            val selector = camera?.let { selectorFor(it.logicalCameraId) } ?: CameraSelector.DEFAULT_BACK_CAMERA
+            val previewBuilder = Preview.Builder()
+            camera?.physicalCameraId?.let { Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(it) }
+            val preview = previewBuilder.build().also { it.surfaceProvider = binding.preview.surfaceProvider }
             provider.unbindAll()
             boundCamera = provider.bindToLifecycle(this, selector, preview)
             applyScoreboardZoom()
@@ -208,29 +211,37 @@ class MainActivity : AppCompatActivity() {
     private fun startCompositionPreview() {
         val configuration = readForm()
         binding.composedOutput.configure(configuration)
-        val courtId = cameraIdFor(Screen.COURT) ?: return
-        val scoreboardId = cameraIdFor(Screen.SCOREBOARD) ?: return
+        val courtKey = cameraIdFor(Screen.COURT) ?: return
+        val scoreboardKey = cameraIdFor(Screen.SCOREBOARD) ?: return
+        val courtInfo = cameraFor(courtKey) ?: return
+        val scoreboardInfo = cameraFor(scoreboardKey) ?: return
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
             provider.unbindAll()
-            val courtSelector = selectorFor(courtId)
-            val scoreboardSelector = selectorFor(scoreboardId)
-            val courtAnalysis = imageAnalysis()
-            val scoreboardAnalysis = imageAnalysis()
+            val courtSelector = selectorFor(courtInfo.logicalCameraId)
+            val scoreboardSelector = selectorFor(scoreboardInfo.logicalCameraId)
+            val courtAnalysis = imageAnalysis(courtInfo)
+            val scoreboardAnalysis = imageAnalysis(scoreboardInfo)
             courtAnalysis.setAnalyzer(courtAnalysisExecutor) { image ->
                 try {
                     val bitmap = YuvToBitmapConverter.convert(image)
                     binding.composedOutput.submitCourt(bitmap)
-                    if (courtId == scoreboardId) binding.composedOutput.submitScoreboard(bitmap.copy(bitmap.config, false))
+                    if (courtKey == scoreboardKey) {
+                        binding.composedOutput.submitScoreboard(bitmap.copy(bitmap.config ?: android.graphics.Bitmap.Config.ARGB_8888, false))
+                    }
                 } finally { image.close() }
             }
             scoreboardAnalysis.setAnalyzer(scoreboardAnalysisExecutor) { image ->
                 try { binding.composedOutput.submitScoreboard(YuvToBitmapConverter.convert(image)) } finally { image.close() }
             }
             try {
-                if (courtId == scoreboardId) {
-                    boundCamera = provider.bindToLifecycle(this, courtSelector, courtAnalysis)
+                if (courtInfo.logicalCameraId == scoreboardInfo.logicalCameraId) {
+                    boundCamera = if (courtKey == scoreboardKey) {
+                        provider.bindToLifecycle(this, courtSelector, courtAnalysis)
+                    } else {
+                        provider.bindToLifecycle(this, courtSelector, courtAnalysis, scoreboardAnalysis)
+                    }
                 } else {
                     val configurations = listOf(
                         ConcurrentCamera.SingleCameraConfig(courtSelector, UseCaseGroup.Builder().addUseCase(courtAnalysis).build(), this),
@@ -253,9 +264,14 @@ class MainActivity : AppCompatActivity() {
         cameras.filter { Camera2CameraInfo.from(it).cameraId == cameraId }
     }.build()
 
-    private fun imageAnalysis(): ImageAnalysis = ImageAnalysis.Builder()
-        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-        .build()
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {
+        val builder = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        camera.physicalCameraId?.let { Camera2Interop.Extender(builder).setPhysicalCameraId(it) }
+        return builder.build()
+    }
+
+    private fun cameraFor(key: String) = capabilities.cameras.firstOrNull { it.id == key }
 
     override fun onDestroy() {
         super.onDestroy()
