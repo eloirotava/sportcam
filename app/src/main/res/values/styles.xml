@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.CasCam" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#73E2A7</item>
+        <item name="android:navigationBarColor">#090D12</item>
+        <item name="android:statusBarColor">#090D12</item>
+    </style>
+</resources>
