@@ -29,6 +29,7 @@ import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
+import dev.cascam.stream.YoutubePublisher
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -48,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private val courtFrameSignature = AtomicLong()
     private val repeatedFrameCount = AtomicInteger()
     private val distinctSourcesConfirmed = AtomicBoolean()
+    private var publisher: YoutubePublisher? = null
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) showScreen(screen) else binding.cameraStatus.text = "Permissão da câmera necessária"
@@ -89,7 +91,7 @@ class MainActivity : AppCompatActivity() {
         binding.navCourt.setOnClickListener { showScreen(Screen.COURT) }
         binding.navScoreboard.setOnClickListener { showScreen(Screen.SCOREBOARD) }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
-        binding.startButton.setOnClickListener { validateBroadcast() }
+        binding.startButton.setOnClickListener { toggleBroadcast() }
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
@@ -113,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showScreen(target: Screen) {
+        if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
         binding.panelCourt.visibility = if (target == Screen.COURT) View.VISIBLE else View.GONE
@@ -157,17 +160,44 @@ class MainActivity : AppCompatActivity() {
         binding.preview.translationX = 0f; binding.preview.translationY = 0f
     }
 
-    private fun validateBroadcast() {
+    private fun validatedBroadcast(): BroadcastConfiguration? {
         val configuration = readForm()
-        when {
-            !configuration.youtubeServerUrl.startsWith("rtmp") -> binding.youtubeServer.error = "Use uma URL RTMP ou RTMPS"
-            configuration.youtubeStreamKey.isBlank() -> binding.youtubeKey.error = "Informe a chave do YouTube Studio"
-            else -> {
-                store.save(configuration)
-                binding.broadcastStatus.text = "Configuração válida. O compositor/encoder RTMPS ainda não está implementado."
-                toast("Configuração pronta; transmissão ainda não iniciada")
-            }
+        return when {
+            !configuration.youtubeServerUrl.startsWith("rtmps://") -> null.also { binding.youtubeServer.error = "Use uma URL RTMPS" }
+            configuration.youtubeStreamKey.isBlank() -> null.also { binding.youtubeKey.error = "Informe a chave do YouTube Studio" }
+            else -> configuration
         }
+    }
+
+    private fun toggleBroadcast() {
+        if (publisher != null) {
+            stopBroadcast()
+            return
+        }
+        val configuration = validatedBroadcast() ?: return
+        store.save(configuration)
+        publisher = YoutubePublisher(configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
+            runOnUiThread {
+                binding.broadcastStatus.text = status
+                if (status.startsWith("Falha")) {
+                    publisher = null
+                    binding.composedOutput.onComposedFrame = null
+                    binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
+                }
+            }
+        }.also { active ->
+            binding.composedOutput.onComposedFrame = active::offer
+            active.start()
+        }
+        binding.startButton.text = "■ ENCERRAR TRANSMISSÃO"
+    }
+
+    private fun stopBroadcast() {
+        val active = publisher ?: return
+        publisher = null
+        binding.composedOutput.onComposedFrame = null
+        active.close()
+        binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
     }
 
     private fun scoreboardZoom() = 1f + binding.scoreboardZoom.progress / 10f
@@ -339,6 +369,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopBroadcast()
         super.onDestroy()
         courtAnalysisExecutor.shutdown()
         scoreboardAnalysisExecutor.shutdown()

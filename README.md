@@ -31,9 +31,10 @@ A interface agora é dividida em três telas: **Quadra**, onde o retângulo 16:9
 movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
 ajustados a área amarela capturada e o retângulo azul de destino, além da câmera e seu
 zoom; e **Ao vivo**, que reúne a composição e os
-dados do YouTube. O botão de play já valida e salva a configuração, mas ainda não
-envia vídeo: o compositor de duas entradas, encoder e cliente RTMPS continuam sendo
-a próxima entrega. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
+dados do YouTube. O botão de play agora codifica a composição em H.264 (720p, 15 fps,
+3 Mbps), empacota os quadros em mensagens de vídeo RTMP e publica por RTMPS no
+servidor e chave configurados. Esta primeira transmissão é somente de vídeo; captura
+e codificação AAC do áudio ainda serão adicionadas. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
 as duas fontes, converte os frames YUV, faz o crop real da quadra e aplica a homografia
 dos quatro pontos do placar para retificá-lo no PiP, sem os guias de configuração.
 Esta primeira composição é desenhada na CPU para validar o resultado no aparelho; a
@@ -55,8 +56,8 @@ objetos no binding. O diagnóstico também apresenta os IDs publicados por
 `CameraManager.concurrentCameraIds`; caso o CameraX não ofereça o mesmo par, informa
 a incompatibilidade e mantém somente a quadra.
 
-O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
-fica nas preferências privadas do app, com backup desabilitado; uma versão de
+O botão alterna entre iniciar e encerrar a transmissão e mostra falhas de conexão ou
+codificação na própria tela. A chave fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
 
 ## Rodando

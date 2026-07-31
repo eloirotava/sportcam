@@ -33,7 +33,7 @@
                     <EditText android:id="@+id/youtube_key" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="xxxx-xxxx-xxxx-xxxx" android:inputType="textPassword" android:textColor="#FFFFFF" android:textColorHint="#718191" android:singleLine="true" />
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
-                    <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para configurar. O encoder RTMPS ainda será conectado ao botão." />
+                    <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
