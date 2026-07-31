@@ -8,12 +8,14 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import dev.cascam.config.BroadcastProtocol
+import dev.cascam.config.VideoCodec
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 class YoutubePublisher(
     private val protocol: BroadcastProtocol,
+    private val videoCodec: VideoCodec,
     private val serverUrl: String,
     private val streamKey: String,
     private val onStatus: (String) -> Unit,
@@ -42,12 +44,13 @@ class YoutubePublisher(
             onStatus(if (protocol == BroadcastProtocol.HLS) "Preparando segmentos HLS…" else "Conectando ao YouTube por RTMPS…")
             val connectedTransport: MediaTransport = when (protocol) {
                 BroadcastProtocol.RTMPS -> RtmpTransport(RtmpClient(serverUrl, streamKey))
-                BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, onStatus)
+                BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, videoCodec, onStatus)
             }
             activeTransport = connectedTransport; connectedTransport.connect(); transport = connectedTransport
             connectedTransport.sendMetadata(WIDTH, HEIGHT, FPS, VIDEO_BITRATE)
-            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            val supportedColors = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).colorFormats.toSet()
+            val videoMime = if (videoCodec == VideoCodec.H265) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+            codec = MediaCodec.createEncoderByType(videoMime)
+            val supportedColors = codec.codecInfo.getCapabilitiesForType(videoMime).colorFormats.toSet()
             val colorFormat = when {
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar in supportedColors ->
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
@@ -55,7 +58,7 @@ class YoutubePublisher(
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
                 else -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
             }
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, WIDTH, HEIGHT).apply {
+            val format = MediaFormat.createVideoFormat(videoMime, WIDTH, HEIGHT).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
                 setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_BITRATE)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
@@ -86,11 +89,15 @@ class YoutubePublisher(
                         val units = listOfNotNull(output.getByteBuffer("csd-0"), output.getByteBuffer("csd-1"))
                             .flatMap { splitNals(it.toByteArray()) }
                             .map(::stripStartCode)
-                        val sps = units.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1f) == 7 }
-                            ?: error("Encoder H.264 não forneceu SPS")
-                        val pps = units.firstOrNull { it.isNotEmpty() && (it[0].toInt() and 0x1f) == 8 }
-                            ?: error("Encoder H.264 não forneceu PPS")
-                        connectedTransport.sendAvcSequenceHeader(sps, pps); sentConfig = true
+                        val vps = if (videoCodec == VideoCodec.H265) units.firstOrNull { hevcNalType(it) == 32 } else null
+                        val spsType = if (videoCodec == VideoCodec.H265) 33 else 7
+                        val ppsType = if (videoCodec == VideoCodec.H265) 34 else 8
+                        val sps = units.firstOrNull { nalType(it, videoCodec) == spsType }
+                            ?: error("Encoder ${videoCodec.label} não forneceu SPS")
+                        val pps = units.firstOrNull { nalType(it, videoCodec) == ppsType }
+                            ?: error("Encoder ${videoCodec.label} não forneceu PPS")
+                        if (videoCodec == VideoCodec.H265 && vps == null) error("Encoder H.265 não forneceu VPS")
+                        connectedTransport.sendVideoConfig(videoCodec, vps, sps, pps); sentConfig = true
                     } else if (index >= 0) {
                         if (sentConfig && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val data = ByteArray(info.size)
@@ -98,7 +105,7 @@ class YoutubePublisher(
                             connectedTransport.sendVideo(splitNals(data), (info.presentationTimeUs / 1_000).toInt(), info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0)
                             sentFrames++
                             if (sentFrames == 1 || sentFrames % 150 == 0) {
-                                onStatus("● ENVIANDO ${protocol.label} · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
+                                onStatus("● ENVIANDO ${protocol.label} · ${videoCodec.label} · 1280×720 · ${FPS} fps · AAC · $sentFrames quadros")
                             }
                         }
                         codec.releaseOutputBuffer(index, false)
@@ -211,6 +218,9 @@ class YoutubePublisher(
         data.size >= 3 && data.sliceArray(0..2).contentEquals(byteArrayOf(0, 0, 1)) -> data.copyOfRange(3, data.size)
         else -> data
     }
+    private fun nalType(data: ByteArray, codec: VideoCodec): Int =
+        if (codec == VideoCodec.H265) hevcNalType(data) else data.firstOrNull()?.toInt()?.and(0x1f) ?: -1
+    private fun hevcNalType(data: ByteArray): Int = data.firstOrNull()?.toInt()?.ushr(1)?.and(0x3f) ?: -1
     private fun splitNals(data: ByteArray): List<ByteArray> {
         val starts = mutableListOf<Pair<Int, Int>>()
         var index = 0

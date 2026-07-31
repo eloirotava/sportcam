@@ -13,11 +13,13 @@ data class BroadcastConfiguration(
     val scoreboardDestination: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
     val scoreboardZoom: Float = 1f,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
+    val videoCodec: VideoCodec = VideoCodec.H264,
     val youtubeServerUrl: String = "rtmps://a.rtmps.youtube.com/live2",
     val youtubeStreamKey: String = "",
 )
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
+enum class VideoCodec(val label: String) { H264("H.264 / AVC"), H265("H.265 / HEVC") }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)
 

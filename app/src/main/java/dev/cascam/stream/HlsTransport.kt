@@ -7,8 +7,9 @@ import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
+import dev.cascam.config.VideoCodec
 
-class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (String) -> Unit) : MediaTransport {
+class HlsTransport(serverUrl: String, streamKey: String, private val videoCodec: VideoCodec, private val onStatus: (String) -> Unit) : MediaTransport {
     private val uploadPrefix = buildPrefix(serverUrl, streamKey)
     private val uploader = Executors.newSingleThreadExecutor()
     private val segment = ByteArrayOutputStream()
@@ -16,6 +17,7 @@ class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (
     private val continuity = mutableMapOf<Int, Int>()
     private var sps = ByteArray(0)
     private var pps = ByteArray(0)
+    private var vps = ByteArray(0)
     private var sequence = 0
     private var segmentStartMs = -1
     private var lastTimestampMs = 0
@@ -23,7 +25,10 @@ class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (
 
     override fun connect() = Unit
     override fun sendMetadata(width: Int, height: Int, frameRate: Int, videoBitrate: Int) = Unit
-    override fun sendAvcSequenceHeader(sps: ByteArray, pps: ByteArray) { this.sps = sps; this.pps = pps }
+    override fun sendVideoConfig(codec: VideoCodec, vps: ByteArray?, sps: ByteArray, pps: ByteArray) {
+        require(codec == videoCodec)
+        this.vps = vps ?: ByteArray(0); this.sps = sps; this.pps = pps
+    }
     override fun sendAacSequenceHeader(config: ByteArray) = Unit
 
     @Synchronized override fun sendVideo(nals: List<ByteArray>, timestampMs: Int, keyFrame: Boolean) {
@@ -34,8 +39,10 @@ class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (
             startSegment(timestampMs)
         }
         val elementary = ByteArrayOutputStream().apply {
-            write(byteArrayOf(0, 0, 0, 1, 9, 0xf0.toByte()))
+            write(byteArrayOf(0, 0, 0, 1))
+            write(if (videoCodec == VideoCodec.H265) byteArrayOf(0x46, 0x01, 0x50) else byteArrayOf(9, 0xf0.toByte()))
             if (keyFrame) {
+                if (vps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(vps) }
                 if (sps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(sps) }
                 if (pps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(pps) }
             }
@@ -58,7 +65,7 @@ class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (
 
     private fun startSegment(timestampMs: Int) {
         segment.reset(); continuity.clear(); segmentStartMs = timestampMs
-        writeSection(0, pat()); writeSection(PMT_PID, pmt())
+        writeSection(0, pat()); writeSection(PMT_PID, pmt(videoCodec))
     }
 
     private fun finishSegment(nextStartMs: Int) {
@@ -176,7 +183,7 @@ class HlsTransport(serverUrl: String, streamKey: String, private val onStatus: (
             (((base and 1) shl 7) or 0x7e).toByte(), 0,
         )
         private fun pat(): ByteArray = withCrc(byteArrayOf(0, 0xb0.toByte(), 0x0d, 0, 1, 0xc1.toByte(), 0, 0, 0, 1, 0xf0.toByte(), 0))
-        private fun pmt(): ByteArray = withCrc(byteArrayOf(2, 0xb0.toByte(), 0x17, 0, 1, 0xc1.toByte(), 0, 0, 0xe1.toByte(), 0, 0xf0.toByte(), 0, 0x1b, 0xe1.toByte(), 0, 0xf0.toByte(), 0, 0x0f, 0xe1.toByte(), 1, 0xf0.toByte(), 0))
+        private fun pmt(codec: VideoCodec): ByteArray = withCrc(byteArrayOf(2, 0xb0.toByte(), 0x17, 0, 1, 0xc1.toByte(), 0, 0, 0xe1.toByte(), 0, 0xf0.toByte(), 0, (if (codec == VideoCodec.H265) 0x24 else 0x1b).toByte(), 0xe1.toByte(), 0, 0xf0.toByte(), 0, 0x0f, 0xe1.toByte(), 1, 0xf0.toByte(), 0))
         private fun withCrc(section: ByteArray): ByteArray {
             var crc = -1
             section.forEach { byte -> repeat(8) { crc = if (((crc ushr 31) xor ((byte.toInt() ushr (7 - it)) and 1)) != 0) (crc shl 1) xor 0x04c11db7 else crc shl 1 } }

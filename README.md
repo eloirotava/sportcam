@@ -109,6 +109,13 @@ HTTP com três tentativas por arquivo. A composição e os encoders são compart
 pelos dois transportes. A URL HLS deve vir do Studio —
 o endpoint RTMPS atual não aceita playlists ou segmentos.
 
+Em HLS, o seletor de codec permite **H.264/AVC** ou **H.265/HEVC**. Para HEVC, o app
+solicita o encoder de hardware `video/hevc`, extrai VPS/SPS/PPS, usa NAL units Annex B
+e anuncia stream type `0x24` na PMT MPEG-TS. Em RTMPS o seletor permanece travado em
+H.264, pois o transporte FLV implementado não carrega HEVC. A disponibilidade real
+do encoder H.265 ainda depende do aparelho; o Galaxy S22 oferece esse encoder por
+hardware.
+
 Referências: [YouTube — HLS ingestion protocol](https://support.google.com/youtube/answer/10349430)
 e [configurações recomendadas de encoder](https://support.google.com/youtube/answer/2853702).
 
