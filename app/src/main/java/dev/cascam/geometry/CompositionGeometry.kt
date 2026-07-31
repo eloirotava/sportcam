@@ -28,6 +28,28 @@ data class NormalizedRect(val left: Float, val top: Float, val right: Float, val
                 NormalizedRect(0f, (1f - normalizedHeight) / 2f, 1f, (1f + normalizedHeight) / 2f)
             }
         }
+
+        fun adjustable16x9(
+            containerWidth: Int,
+            containerHeight: Int,
+            zoom: Float,
+            panX: Float,
+            panY: Float,
+        ): NormalizedRect {
+            require(zoom in 1f..8f)
+            require(panX in -1f..1f && panY in -1f..1f)
+            val base = centered16x9(containerWidth, containerHeight)
+            val width = base.width / zoom
+            val height = base.height / zoom
+            val centerX = .5f + panX * (1f - width) / 2f
+            val centerY = .5f + panY * (1f - height) / 2f
+            return NormalizedRect(
+                centerX - width / 2f,
+                centerY - height / 2f,
+                centerX + width / 2f,
+                centerY + height / 2f,
+            )
+        }
     }
 }
 

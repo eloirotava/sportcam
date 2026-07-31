@@ -29,4 +29,11 @@ class CompositionGeometryTest {
     fun `rejects degenerate scoreboard quadrilateral`() {
         ScoreboardQuad(List(4) { NormalizedPoint(.5f, .5f) })
     }
+
+    @Test fun `adjustable crop preserves 16 by 9 pixel ratio`() {
+        val crop = NormalizedRect.adjustable16x9(2400, 1080, 2f, 1f, -1f)
+        assertEquals(16f / 9f, crop.width * 2400f / (crop.height * 1080f), .0001f)
+        assertEquals(1f, crop.right, .0001f)
+        assertEquals(0f, crop.top, .0001f)
+    }
 }

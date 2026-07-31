@@ -20,11 +20,15 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
 - quadrilátero do placar com quatro alças arrastáveis;
+- seleção independente da câmera da quadra e do placar;
+- controles de zoom e deslocamento do recorte, posição do placar na composição e
+  servidor/chave do YouTube, persistidos localmente;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
-O botão de transmissão ainda é uma simulação. Não aceita nem armazena uma chave de
-stream nesta etapa.
+O botão de transmissão ainda valida a configuração sem iniciar o encoder. A chave
+fica nas preferências privadas do app, com backup desabilitado; uma versão de
+produção deverá protegê-la com Android Keystore.
 
 ## Rodando
 
