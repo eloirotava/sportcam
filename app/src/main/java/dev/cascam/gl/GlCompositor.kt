@@ -24,7 +24,13 @@ import kotlin.math.abs
  * vira o que a GPU já faz nativamente.
  */
 class GlCompositor(private val onStatus: (String) -> Unit) {
-    private class Target(val surface: Surface, val eglSurface: EGLSurface, val width: Int, val height: Int, val isEncoder: Boolean)
+    private class Target(
+        val surface: Surface,
+        val eglSurface: EGLSurface,
+        val width: Int,
+        val height: Int,
+        val presentationOriginNanos: Long?,
+    )
 
     private val thread = HandlerThread("cascam-gl").also { it.start() }
     private val handler = Handler(thread.looper)
@@ -52,7 +58,6 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     private var scoreboardPending = false
     private var captureSize = Size(1920, 1080)
     private var rotationDegrees = 0
-    private var startedAtNanos = 0L
 
     @Volatile private var configuration = BroadcastConfiguration()
     @Volatile private var ready = false
@@ -84,7 +89,6 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 }
                 courtSurface = Surface(courtStream)
                 scoreboardSurface = Surface(scoreboardStream)
-                startedAtNanos = System.nanoTime()
                 ready = true
             }.onSuccess { onReady() }.onFailure { onStatus("Composição GPU indisponível: ${it.message}") }
         }
@@ -94,11 +98,16 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         configuration = value
     }
 
-    fun addTarget(surface: Surface, width: Int, height: Int, isEncoder: Boolean) {
+    fun addTarget(
+        surface: Surface,
+        width: Int,
+        height: Int,
+        presentationOriginNanos: Long? = null,
+    ) {
         handler.post {
             if (!ready) return@post
             runCatching { egl.createWindowSurface(surface) }
-                .onSuccess { targets += Target(surface, it, width, height, isEncoder) }
+                .onSuccess { targets += Target(surface, it, width, height, presentationOriginNanos) }
                 .onFailure { onStatus("Não consegui usar um destino GPU: ${it.message}") }
         }
     }
@@ -181,7 +190,12 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             )
 
             GLES20.glDisableVertexAttribArray(unitHandle)
-            if (target.isEncoder) egl.setPresentationTime(target.eglSurface, System.nanoTime() - startedAtNanos)
+            target.presentationOriginNanos?.let { origin ->
+                // Vídeo e áudio precisam usar o mesmo relógio. O compositor pode estar ativo desde
+                // que a aba AO VIVO foi aberta, mas o PTS da transmissão começa junto do encoder.
+                val presentationTimeNanos = (System.nanoTime() - origin).coerceAtLeast(0L)
+                egl.setPresentationTime(target.eglSurface, presentationTimeNanos)
+            }
             egl.swapBuffers(target.eglSurface)
         }
     }

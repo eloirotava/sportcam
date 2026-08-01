@@ -532,12 +532,14 @@ class MainActivity : AppCompatActivity() {
             configuration.protocol, configuration.videoCodec, bitrate,
             configuration.youtubeServerUrl, configuration.youtubeStreamKey, configuration.liveLatency,
             useSurfaceInput = gpu,
-            onInputSurface = { surface ->
+            onInputSurface = { surface, presentationOriginNanos ->
                 runOnUiThread {
                     val active = compositor ?: return@runOnUiThread
                     val encoder = publisher
                     if (surface == null) encoderSurface?.let(active::removeTarget)
-                    else if (encoder != null) active.addTarget(surface, encoder.videoWidth, encoder.videoHeight, isEncoder = true)
+                    else if (encoder != null && presentationOriginNanos != null) {
+                        active.addTarget(surface, encoder.videoWidth, encoder.videoHeight, presentationOriginNanos)
+                    }
                     encoderSurface = surface
                 }
             },
@@ -729,13 +731,13 @@ class MainActivity : AppCompatActivity() {
         val holder = binding.gpuOutput.holder
         val surface = holder.surface
         if (surface != null && surface.isValid) {
-            created.addTarget(surface, binding.gpuOutput.width.coerceAtLeast(1), binding.gpuOutput.height.coerceAtLeast(1), isEncoder = false)
+            created.addTarget(surface, binding.gpuOutput.width.coerceAtLeast(1), binding.gpuOutput.height.coerceAtLeast(1))
         }
         holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) = Unit
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                 compositor?.removeTarget(holder.surface)
-                compositor?.addTarget(holder.surface, width, height, isEncoder = false)
+                compositor?.addTarget(holder.surface, width, height)
             }
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 compositor?.removeTarget(holder.surface)

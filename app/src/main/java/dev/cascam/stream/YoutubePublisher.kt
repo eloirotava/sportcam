@@ -27,7 +27,7 @@ class YoutubePublisher(
      * GPU alimenta por OpenGL. Aí [offer] não é usado e não existe conversão em CPU nenhuma.
      */
     private val useSurfaceInput: Boolean = false,
-    private val onInputSurface: (Surface?) -> Unit = {},
+    private val onInputSurface: (surface: Surface?, presentationOriginNanos: Long?) -> Unit = { _, _ -> },
     private val onStatus: (String) -> Unit,
 ) : AutoCloseable {
     private var inputSurface: Surface? = null
@@ -85,11 +85,13 @@ class YoutubePublisher(
             }
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             if (useSurfaceInput) {
-                // A surface só existe entre configure() e start(); quem desenha nela é avisado aqui.
-                inputSurface = codec.createInputSurface().also(onInputSurface)
+                inputSurface = codec.createInputSurface()
             }
             codec.start()
             val startedAt = System.nanoTime()
+            // Compartilha a mesma origem usada pelo áudio. Assim o compositor não inclui no PTS o
+            // tempo durante o qual a prévia GPU ficou aberta antes do início da transmissão.
+            inputSurface?.let { onInputSurface(it, startedAt) }
             audioWorker = Thread({ publishAudio(connectedTransport, startedAt) }, "cascam-audio").also { it.start() }
             onStatus(if (protocol == BroadcastProtocol.HLS) "HLS ativo; aguardando o primeiro segmento de %.0f s…".format(latency.segmentMillis / 1_000f) else "Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
             val info = MediaCodec.BufferInfo()
@@ -139,7 +141,7 @@ class YoutubePublisher(
         } catch (error: Exception) {
             if (running.getAndSet(false)) onStatus("Falha na transmissão: ${error.message ?: error.javaClass.simpleName}")
         } finally {
-            onInputSurface(null)
+            onInputSurface(null, null)
             runCatching { inputSurface?.release() }
             inputSurface = null
             frames.forEach(Bitmap::recycle); frames.clear()
