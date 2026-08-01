@@ -567,6 +567,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateZoomLabels() {
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
     }
+    private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestCameraIfNeeded() {
+        val missing = listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+    }
+
     @ExperimentalCamera2Interop
     private fun startCamera(cameraKey: String?) {
         val future = ProcessCameraProvider.getInstance(this)
