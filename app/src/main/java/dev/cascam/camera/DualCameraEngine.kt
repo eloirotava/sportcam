@@ -17,6 +17,7 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
+import android.view.Surface
 import java.util.concurrent.Executor
 import kotlin.math.roundToInt
 
@@ -55,6 +56,8 @@ class DualCameraEngine(
     private var session: CameraCaptureSession? = null
     private var courtReader: ImageReader? = null
     private var scoreboardReader: ImageReader? = null
+    private var courtOutput: Surface? = null
+    private var scoreboardOutput: Surface? = null
     private var rotationDegrees = 0
     private var scoreboardZoom = 1f
     private var courtTargetWidth = COURT_TARGET_WIDTH
@@ -80,8 +83,13 @@ class DualCameraEngine(
         return Plan(court.logicalCameraId, courtPhysical, scoreboardPhysical, size, logical?.perPhysicalZoom ?: PerPhysicalZoom.NONE)
     }
 
+    /**
+     * Quando [outputs] vem preenchido, a câmera escreve direto nessas superfícies e nenhum quadro
+     * passa pela CPU — é o caminho da composição em GPU. Sem elas, o motor cria ImageReaders e
+     * entrega bitmaps convertidos, que é o caminho em CPU.
+     */
     @SuppressLint("MissingPermission")
-    fun start(plan: Plan, displayRotationDegrees: Int, scoreboardZoomRatio: Float) {
+    fun start(plan: Plan, displayRotationDegrees: Int, scoreboardZoomRatio: Float, outputs: Pair<Surface, Surface>? = null) {
         stop()
         this.plan = plan
         this.scoreboardZoom = scoreboardZoomRatio
@@ -89,12 +97,19 @@ class DualCameraEngine(
         running = true
         frameCounts.clear()
         handler.post {
-            val court = ImageReader.newInstance(plan.size.width, plan.size.height, ImageFormat.YUV_420_888, 3)
-            val scoreboard = ImageReader.newInstance(plan.size.width, plan.size.height, ImageFormat.YUV_420_888, 3)
-            courtReader = court
-            scoreboardReader = scoreboard
-            court.setOnImageAvailableListener({ reader -> deliver(reader, Role.COURT, courtTargetWidth) }, handler)
-            scoreboard.setOnImageAvailableListener({ reader -> deliver(reader, Role.SCOREBOARD, scoreboardTargetWidth) }, handler)
+            if (outputs != null) {
+                courtOutput = outputs.first
+                scoreboardOutput = outputs.second
+            } else {
+                val court = ImageReader.newInstance(plan.size.width, plan.size.height, ImageFormat.YUV_420_888, 3)
+                val scoreboard = ImageReader.newInstance(plan.size.width, plan.size.height, ImageFormat.YUV_420_888, 3)
+                courtReader = court
+                scoreboardReader = scoreboard
+                courtOutput = court.surface
+                scoreboardOutput = scoreboard.surface
+                court.setOnImageAvailableListener({ reader -> deliver(reader, Role.COURT, courtTargetWidth) }, handler)
+                scoreboard.setOnImageAvailableListener({ reader -> deliver(reader, Role.SCOREBOARD, scoreboardTargetWidth) }, handler)
+            }
             try {
                 manager.openCamera(plan.logicalId, deviceCallback, handler)
             } catch (error: CameraAccessException) {
@@ -122,6 +137,8 @@ class DualCameraEngine(
             device = null
             courtReader = null
             scoreboardReader = null
+            courtOutput = null
+            scoreboardOutput = null
         }
     }
 
@@ -145,11 +162,11 @@ class DualCameraEngine(
 
     private fun configure(camera: CameraDevice) {
         val plan = plan ?: return
-        val court = courtReader ?: return
-        val scoreboard = scoreboardReader ?: return
+        val court = courtOutput ?: return
+        val scoreboard = scoreboardOutput ?: return
         val outputs = listOf(
-            OutputConfiguration(court.surface).apply { setPhysicalCameraId(plan.courtPhysicalId) },
-            OutputConfiguration(scoreboard.surface).apply { setPhysicalCameraId(plan.scoreboardPhysicalId) },
+            OutputConfiguration(court).apply { setPhysicalCameraId(plan.courtPhysicalId) },
+            OutputConfiguration(scoreboard).apply { setPhysicalCameraId(plan.scoreboardPhysicalId) },
         )
         val callback = object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(configured: CameraCaptureSession) {
@@ -174,12 +191,12 @@ class DualCameraEngine(
         val plan = plan ?: return
         val camera = device ?: return
         val configured = session ?: return
-        val court = courtReader ?: return
-        val scoreboard = scoreboardReader ?: return
+        val court = courtOutput ?: return
+        val scoreboard = scoreboardOutput ?: return
         try {
             val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                addTarget(court.surface)
-                addTarget(scoreboard.surface)
+                addTarget(court)
+                addTarget(scoreboard)
                 set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             }
             applyScoreboardZoom(builder, plan)
@@ -259,7 +276,8 @@ class DualCameraEngine(
             .maxByOrNull { it.width.toLong() * it.height }
     }
 
-    private fun rotationFor(logicalId: String, displayRotationDegrees: Int): Int {
+    /** Rotação que a composição precisa aplicar; a GPU também precisa dela antes de abrir a câmera. */
+    fun rotationFor(logicalId: String, displayRotationDegrees: Int): Int {
         val sensor = runCatching {
             manager.getCameraCharacteristics(logicalId).get(CameraCharacteristics.SENSOR_ORIENTATION)
         }.getOrNull() ?: 0

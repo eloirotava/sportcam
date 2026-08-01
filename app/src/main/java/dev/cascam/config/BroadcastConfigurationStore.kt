@@ -37,6 +37,9 @@ class BroadcastConfigurationStore(context: Context) {
         liveLatency = runCatching {
             LiveLatency.valueOf(preferences.getString("live_latency", null).orEmpty())
         }.getOrDefault(LiveLatency.LOW),
+        compositionEngine = runCatching {
+            CompositionEngine.valueOf(preferences.getString("composition_engine", null).orEmpty())
+        }.getOrDefault(CompositionEngine.CPU),
     )
 
     fun save(configuration: BroadcastConfiguration) {
@@ -59,6 +62,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("live_title", configuration.liveTitle)
             .putString("live_privacy", configuration.livePrivacy.name)
             .putString("live_latency", configuration.liveLatency.name)
+            .putString("composition_engine", configuration.compositionEngine.name)
             .apply()
     }
 

@@ -6,6 +6,7 @@
         app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent">
         <androidx.camera.view.PreviewView android:id="@+id/preview" android:layout_width="match_parent" android:layout_height="match_parent" />
         <dev.cascam.ui.ComposedOutputView android:id="@+id/composed_output" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
+        <SurfaceView android:id="@+id/gpu_output" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
         <FrameLayout android:id="@+id/scoreboard_preview_container" android:layout_width="240dp" android:layout_height="135dp"
             android:layout_gravity="top|end" android:layout_margin="18dp" android:background="#000000" android:visibility="gone">
             <androidx.camera.view.PreviewView android:id="@+id/scoreboard_preview" android:layout_width="match_parent" android:layout_height="match_parent" />
@@ -28,6 +29,9 @@
                     <TextView style="@style/PanelTitle" android:text="Composição e transmissão" />
                     <TextView style="@style/PanelLabel" android:text="Protocolo de ingestão" />
                     <Spinner android:id="@+id/broadcast_protocol" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelLabel" android:text="Composição" />
+                    <Spinner android:id="@+id/composition_engine" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView android:id="@+id/composition_hint" style="@style/PanelHint" android:text="CPU converte cada quadro e desenha em Canvas. GPU deixa a câmera escrever em textura e compõe em OpenGL, sem passar pelo processador." />
                     <TextView style="@style/PanelLabel" android:text="Codec de vídeo" />
                     <Spinner android:id="@+id/video_codec" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />

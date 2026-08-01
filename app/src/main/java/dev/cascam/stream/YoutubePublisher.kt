@@ -7,7 +7,9 @@ import android.media.MediaFormat
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.view.Surface
 import dev.cascam.config.BroadcastProtocol
+import dev.cascam.config.LiveLatency
 import dev.cascam.config.VideoCodec
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
@@ -19,12 +21,20 @@ class YoutubePublisher(
     private val videoBitrate: Int,
     private val serverUrl: String,
     private val streamKey: String,
+    private val latency: LiveLatency,
+    /**
+     * Em modo surface o encoder recebe os quadros direto de uma Surface, que é o que o caminho
+     * GPU alimenta por OpenGL. Aí [offer] não é usado e não existe conversão em CPU nenhuma.
+     */
+    private val useSurfaceInput: Boolean = false,
+    private val onInputSurface: (Surface?) -> Unit = {},
     private val onStatus: (String) -> Unit,
 ) : AutoCloseable {
+    private var inputSurface: Surface? = null
     private val running = AtomicBoolean()
     private val frames = ArrayBlockingQueue<Bitmap>(1)
-    private val videoWidth = if (videoBitrate <= 500_000) 640 else 1280
-    private val videoHeight = if (videoBitrate <= 500_000) 360 else 720
+    val videoWidth = if (videoBitrate <= 500_000) 640 else 1280
+    val videoHeight = if (videoBitrate <= 500_000) 360 else 720
     private var worker: Thread? = null
     @Volatile private var activeTransport: MediaTransport? = null
     private var audioWorker: Thread? = null
@@ -35,7 +45,7 @@ class YoutubePublisher(
     }
 
     fun offer(bitmap: Bitmap) {
-        if (!running.get()) { bitmap.recycle(); return }
+        if (useSurfaceInput || !running.get()) { bitmap.recycle(); return }
         val prepared = if (bitmap.width == videoWidth && bitmap.height == videoHeight) bitmap else {
             Bitmap.createScaledBitmap(bitmap, videoWidth, videoHeight, true).also { bitmap.recycle() }
         }
@@ -50,7 +60,7 @@ class YoutubePublisher(
             onStatus(if (protocol == BroadcastProtocol.HLS) "Preparando segmentos HLS…" else "Conectando ao YouTube por RTMPS…")
             val connectedTransport: MediaTransport = when (protocol) {
                 BroadcastProtocol.RTMPS -> RtmpTransport(RtmpClient(serverUrl, streamKey))
-                BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, videoCodec, onStatus)
+                BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, videoCodec, latency.segmentMillis, onStatus)
             }
             activeTransport = connectedTransport; connectedTransport.connect(); transport = connectedTransport
             connectedTransport.sendMetadata(videoWidth, videoHeight, FPS, videoBitrate)
@@ -58,6 +68,7 @@ class YoutubePublisher(
             codec = MediaCodec.createEncoderByType(videoMime)
             val supportedColors = codec.codecInfo.getCapabilitiesForType(videoMime).colorFormats.toSet()
             val colorFormat = when {
+                useSurfaceInput -> MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar in supportedColors ->
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar in supportedColors ->
@@ -68,18 +79,24 @@ class YoutubePublisher(
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
                 setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+                // O segmento HLS só fecha em keyframe: GOP maior que o segmento trava a latência
+                // no GOP, não no segmento pedido.
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, (latency.segmentMillis / 1_000).coerceAtLeast(1))
             }
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            if (useSurfaceInput) {
+                // A surface só existe entre configure() e start(); quem desenha nela é avisado aqui.
+                inputSurface = codec.createInputSurface().also(onInputSurface)
+            }
             codec.start()
             val startedAt = System.nanoTime()
             audioWorker = Thread({ publishAudio(connectedTransport, startedAt) }, "cascam-audio").also { it.start() }
-            onStatus(if (protocol == BroadcastProtocol.HLS) "HLS ativo; aguardando o primeiro segmento de 2 s…" else "Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
+            onStatus(if (protocol == BroadcastProtocol.HLS) "HLS ativo; aguardando o primeiro segmento de %.0f s…".format(latency.segmentMillis / 1_000f) else "Publicação aceita pelo YouTube; aguardando o primeiro quadro H.264…")
             val info = MediaCodec.BufferInfo()
             var sentConfig = false
             var sentFrames = 0
             while (running.get()) {
-                frames.poll()?.let { bitmap ->
+                if (!useSurfaceInput) frames.poll()?.let { bitmap ->
                     val index = codec.dequeueInputBuffer(5_000)
                     if (index >= 0) {
                         codec.getInputBuffer(index)?.let { argbToYuv420(bitmap, it, colorFormat) }
@@ -117,11 +134,14 @@ class YoutubePublisher(
                         codec.releaseOutputBuffer(index, false)
                     } else break
                 }
-                if (frames.isEmpty()) Thread.sleep(5)
+                if (useSurfaceInput || frames.isEmpty()) Thread.sleep(5)
             }
         } catch (error: Exception) {
             if (running.getAndSet(false)) onStatus("Falha na transmissão: ${error.message ?: error.javaClass.simpleName}")
         } finally {
+            onInputSurface(null)
+            runCatching { inputSurface?.release() }
+            inputSurface = null
             frames.forEach(Bitmap::recycle); frames.clear()
             audioWorker?.join(1_000); audioWorker = null
             runCatching { codec?.stop() }; runCatching { codec?.release() }; transport?.close(); activeTransport = null
@@ -254,7 +274,8 @@ class YoutubePublisher(
     }
 
     companion object {
-        private const val FPS = 15
+        /** Taxa de captura confirmada com os dois sensores físicos ligados juntos. */
+        const val FPS = 20
         private const val AUDIO_RATE = 44_100
     }
 }

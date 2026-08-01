@@ -22,9 +22,20 @@ data class BroadcastConfiguration(
     val liveTitle: String = "CasCam ao vivo",
     val livePrivacy: LivePrivacy = LivePrivacy.UNLISTED,
     val liveLatency: LiveLatency = LiveLatency.LOW,
+    val compositionEngine: CompositionEngine = CompositionEngine.CPU,
 )
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
+
+/**
+ * Onde a quadra e o placar são juntados. A CPU converte cada quadro para bitmap e desenha em
+ * Canvas; a GPU deixa a câmera escrever em textura e compõe em OpenGL, sem nenhum pixel passando
+ * pelo processador. A escolha fica na tela porque as duas têm defeito: a CPU esquenta o aparelho,
+ * e a GPU depende de o driver aceitar a combinação de superfícies.
+ */
+enum class CompositionEngine(val label: String) {
+    CPU("CPU · Canvas"), GPU("GPU · OpenGL"),
+}
 enum class VideoCodec(val label: String) { H264("H.264 / AVC"), H265("H.265 / HEVC") }
 enum class BitratePreset(val label: String, val bitsPerSecond: Int?) {
     AUTO("Automático (Wi-Fi alto / dados baixo)", null),
@@ -38,14 +49,18 @@ enum class LivePrivacy(val label: String, val apiValue: String) {
 }
 
 /**
- * Mesmas opções do YouTube Studio. A ultrabaixa não existe em HLS: ingestão por segmentos não
- * chega lá, por construção — quem quer o menor atraso precisa estar em RTMPS. A ultrabaixa
- * também abre mão do DVR, então quem assiste não consegue voltar a fita durante o jogo.
+ * Mesmas opções do YouTube Studio, sem o app filtrar nada: quem aceita ou recusa a combinação é o
+ * YouTube, e a recusa aparece na tela. A ultrabaixa abre mão do DVR, então quem assiste não
+ * consegue voltar a fita durante o jogo.
+ *
+ * Em HLS o atraso não vem só desta escolha: ingestão por segmentos carrega o tamanho do segmento
+ * embutido na latência, e é por isso que [segmentMillis] encolhe junto. O YouTube aceita de 1 a 4
+ * segundos por segmento, e quanto menor, menor o atraso.
  */
-enum class LiveLatency(val label: String, val apiValue: String, val allowsDvr: Boolean, val requiresRtmps: Boolean) {
-    NORMAL("Normal · mais estável", "normal", true, false),
-    LOW("Baixa", "low", true, false),
-    ULTRA_LOW("Ultrabaixa · só RTMPS, sem DVR", "ultraLow", false, true),
+enum class LiveLatency(val label: String, val apiValue: String, val allowsDvr: Boolean, val segmentMillis: Int) {
+    NORMAL("Normal · mais estável", "normal", true, 4_000),
+    LOW("Baixa", "low", true, 2_000),
+    ULTRA_LOW("Ultrabaixa · sem DVR", "ultraLow", false, 1_000),
 }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)

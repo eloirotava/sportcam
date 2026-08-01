@@ -12,6 +12,7 @@ import android.util.AttributeSet
 import android.view.View
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.geometry.NormalizedRect
+import dev.cascam.stream.YoutubePublisher
 
 class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -43,12 +44,17 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
 
     private fun exportFrameIfNeeded() {
         val now = System.nanoTime()
-        if (onComposedFrame != null && now - lastExportNanos >= 66_000_000L) {
+        if (onComposedFrame != null && now - lastExportNanos >= EXPORT_INTERVAL_NANOS) {
             lastExportNanos = now
             val output = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
             render(Canvas(output), output.width, output.height)
             onComposedFrame?.invoke(output)
         }
+    }
+
+    private companion object {
+        /** Casado com a taxa de captura: exportar mais devagar converteria quadros para o lixo. */
+        const val EXPORT_INTERVAL_NANOS = 1_000_000_000L / YoutubePublisher.FPS
     }
 
     private fun render(canvas: Canvas, outputWidth: Int, outputHeight: Int) {

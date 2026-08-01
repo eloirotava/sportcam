@@ -37,6 +37,9 @@ import dev.cascam.camera.CameraInfo
 import dev.cascam.camera.CameraXSupport
 import dev.cascam.camera.DualCameraEngine
 import dev.cascam.camera.DualCameraProbe
+import dev.cascam.config.CompositionEngine
+import dev.cascam.gl.GlCompositor
+import android.view.SurfaceHolder
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.BroadcastProtocol
 import dev.cascam.config.VideoCodec
@@ -76,6 +79,8 @@ class MainActivity : AppCompatActivity() {
     private var probeReport: String = ""
     private var ingestion: YoutubeLiveApi.Ingestion? = null
     private var dualCameraEngine: DualCameraEngine? = null
+    private var compositor: GlCompositor? = null
+    private var encoderSurface: Surface? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -111,12 +116,26 @@ class MainActivity : AppCompatActivity() {
         binding.videoCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, VideoCodec.entries.map { it.label })
         binding.videoCodec.setSelection(VideoCodec.entries.indexOf(configuration.videoCodec))
         binding.videoCodec.isEnabled = configuration.protocol == BroadcastProtocol.HLS
+        binding.compositionEngine.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, CompositionEngine.entries.map { it.label })
+        binding.compositionEngine.setSelection(CompositionEngine.entries.indexOf(configuration.compositionEngine))
+        binding.compositionEngine.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (screen == Screen.BROADCAST) showScreen(Screen.BROADCAST)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         binding.bitratePreset.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BitratePreset.entries.map { it.label })
         binding.bitratePreset.setSelection(BitratePreset.entries.indexOf(configuration.bitratePreset))
         binding.livePrivacy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LivePrivacy.entries.map { it.label })
         binding.livePrivacy.setSelection(LivePrivacy.entries.indexOf(configuration.livePrivacy))
         binding.liveLatency.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LiveLatency.entries.map { it.label })
         binding.liveLatency.setSelection(LiveLatency.entries.indexOf(configuration.liveLatency))
+        binding.liveLatency.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applyLatencyRestrictions(BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition])
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         binding.youtubeClientId.setText(configuration.youtubeOAuthClientId)
         binding.youtubeClientSecret.setText(configuration.youtubeOAuthClientSecret)
         binding.liveTitle.setText(configuration.liveTitle)
@@ -191,7 +210,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScreen(target: Screen) {
         if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
-        if (target != Screen.BROADCAST) dualCameraEngine?.stop()
+        if (target != Screen.BROADCAST) { dualCameraEngine?.stop(); releaseCompositor() }
         if (target != Screen.DIAGNOSTICS) stopProbe()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
@@ -205,7 +224,9 @@ class MainActivity : AppCompatActivity() {
             Screen.DIAGNOSTICS -> null
         }?.let(binding.compositionOverlay::setMode)
         binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
-        binding.composedOutput.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
+        val gpuComposition = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
+        binding.composedOutput.visibility = if (target == Screen.BROADCAST && !gpuComposition) View.VISIBLE else View.GONE
+        binding.gpuOutput.visibility = if (target == Screen.BROADCAST && gpuComposition) View.VISIBLE else View.GONE
         binding.preview.visibility = if (target == Screen.BROADCAST || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
         binding.scoreboardPreviewContainer.visibility = View.GONE
         resetCourtTransform()
@@ -247,10 +268,11 @@ class MainActivity : AppCompatActivity() {
             liveTitle = binding.liveTitle.text.toString().trim().ifBlank { "CasCam ao vivo" },
             livePrivacy = LivePrivacy.entries[binding.livePrivacy.selectedItemPosition],
             liveLatency = LiveLatency.entries[binding.liveLatency.selectedItemPosition],
+            compositionEngine = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition],
         )
     }
 
-    private fun saveConfiguration() = store.save(readForm())
+    private fun saveConfiguration() = store.save(readForm()).also { compositor?.configure(readForm()) }
 
     private fun authorizeYoutube() {
         val clientId = binding.youtubeClientId.text.toString().trim()
@@ -375,20 +397,16 @@ class MainActivity : AppCompatActivity() {
         toast("Relatório copiado")
     }
 
-    /** A ultrabaixa não existe em ingestão HLS; em vez de deixar o YouTube recusar, resolve aqui. */
+    /** Sem filtro do app: o YouTube decide se aceita a combinação, e a recusa aparece na tela. */
     private fun applyLatencyRestrictions(protocol: BroadcastProtocol) {
         val chosen = LiveLatency.entries[binding.liveLatency.selectedItemPosition]
-        if (protocol == BroadcastProtocol.HLS && chosen.requiresRtmps) {
-            binding.liveLatency.setSelection(LiveLatency.entries.indexOf(LiveLatency.LOW))
-            binding.latencyHint.text = "Ultrabaixa não vale em HLS; troquei para Baixa. Para o menor atraso, escolha RTMPS."
-        } else {
-            binding.latencyHint.text = when {
-                protocol == BroadcastProtocol.HLS ->
-                    "HLS envia em segmentos de 2 s e o YouTube ainda precisa juntar alguns antes de publicar, então o atraso fica na casa dos 15 a 30 s. Para menos que isso, RTMPS."
-                chosen == LiveLatency.ULTRA_LOW -> "Menor atraso possível, sem DVR: quem assiste não consegue voltar a fita."
-                chosen == LiveLatency.LOW -> "Meio-termo do Studio, com DVR preservado."
-                else -> "Mais buffer no YouTube: melhor para rede instável, pior para acompanhar o jogo ao vivo."
-            }
+        val segment = "segmentos de %.0f s".format(chosen.segmentMillis / 1_000f)
+        binding.latencyHint.text = when {
+            protocol == BroadcastProtocol.HLS ->
+                "Em HLS o atraso carrega o tamanho do segmento junto, então esta escolha também encolhe o segmento: $segment."
+            chosen == LiveLatency.ULTRA_LOW -> "Menor atraso possível, sem DVR: quem assiste não consegue voltar a fita."
+            chosen == LiveLatency.LOW -> "Meio-termo do Studio, com DVR preservado."
+            else -> "Mais buffer no YouTube: melhor para rede instável, pior para acompanhar o jogo ao vivo."
         }
     }
 
@@ -438,7 +456,23 @@ class MainActivity : AppCompatActivity() {
         ) 350_000 else 3_000_000
         store.save(configuration)
         ContextCompat.startForegroundService(this, Intent(this, BroadcastService::class.java))
-        publisher = YoutubePublisher(configuration.protocol, configuration.videoCodec, bitrate, configuration.youtubeServerUrl, configuration.youtubeStreamKey) { status ->
+        // Em GPU o encoder recebe os quadros pela própria surface dele, que entra como mais um
+        // destino do compositor; em CPU continua recebendo bitmaps já compostos.
+        val gpu = configuration.compositionEngine == CompositionEngine.GPU && compositor?.isReady == true
+        publisher = YoutubePublisher(
+            configuration.protocol, configuration.videoCodec, bitrate,
+            configuration.youtubeServerUrl, configuration.youtubeStreamKey, configuration.liveLatency,
+            useSurfaceInput = gpu,
+            onInputSurface = { surface ->
+                runOnUiThread {
+                    val active = compositor ?: return@runOnUiThread
+                    val encoder = publisher
+                    if (surface == null) encoderSurface?.let(active::removeTarget)
+                    else if (encoder != null) active.addTarget(surface, encoder.videoWidth, encoder.videoHeight, isEncoder = true)
+                    encoderSurface = surface
+                }
+            },
+        ) { status ->
             runOnUiThread {
                 binding.broadcastStatus.text = status
                 if (status.startsWith("Falha")) {
@@ -451,7 +485,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.also { active ->
-            binding.composedOutput.onComposedFrame = active::offer
+            if (!gpu) binding.composedOutput.onComposedFrame = active::offer
             active.start()
         }
         binding.startButton.text = "■ ENCERRAR TRANSMISSÃO"
@@ -461,6 +495,8 @@ class MainActivity : AppCompatActivity() {
         val active = publisher ?: return
         publisher = null
         binding.composedOutput.onComposedFrame = null
+        encoderSurface?.let { surface -> compositor?.removeTarget(surface) }
+        encoderSurface = null
         active.close()
         stopService(Intent(this, BroadcastService::class.java))
         binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
@@ -596,13 +632,60 @@ class MainActivity : AppCompatActivity() {
             onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
         ).also { dualCameraEngine = it }
         val plan = engine.planFor(capabilities, court, scoreboard, DUAL_SENSOR_CEILING) ?: return false
+        val useGpu = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
         // Só abrir a lógica depois que o CameraX largou, senão o openCamera volta com CAMERA_IN_USE.
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             runCatching { future.get().unbindAll() }
-            engine.start(plan, displayRotationDegrees(), scoreboardZoom())
+            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, displayRotationDegrees(), scoreboardZoom())
         }, ContextCompat.getMainExecutor(this))
         return true
+    }
+
+    /**
+     * Em GPU a ordem importa: o compositor precisa existir e ter criado as SurfaceTextures antes de
+     * a câmera abrir, porque são elas os destinos da sessão de captura.
+     */
+    private fun startGpuComposition(engine: DualCameraEngine, plan: DualCameraEngine.Plan) {
+        releaseCompositor()
+        val created = GlCompositor { status -> runOnUiThread { binding.broadcastStatus.text = status } }
+        compositor = created
+        created.configure(readForm())
+        created.start(plan.size, engine.rotationFor(plan.logicalId, displayRotationDegrees())) {
+            runOnUiThread {
+                val courtSurface = created.courtSurface
+                val scoreboardSurface = created.scoreboardSurface
+                if (courtSurface == null || scoreboardSurface == null) {
+                    binding.broadcastStatus.text = "Composição GPU não inicializou; volte para CPU."
+                    return@runOnUiThread
+                }
+                attachGpuPreview(created)
+                engine.start(plan, displayRotationDegrees(), scoreboardZoom(), courtSurface to scoreboardSurface)
+            }
+        }
+    }
+
+    private fun attachGpuPreview(created: GlCompositor) {
+        val holder = binding.gpuOutput.holder
+        val surface = holder.surface
+        if (surface != null && surface.isValid) {
+            created.addTarget(surface, binding.gpuOutput.width.coerceAtLeast(1), binding.gpuOutput.height.coerceAtLeast(1), isEncoder = false)
+        }
+        holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) = Unit
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                compositor?.removeTarget(holder.surface)
+                compositor?.addTarget(holder.surface, width, height, isEncoder = false)
+            }
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                compositor?.removeTarget(holder.surface)
+            }
+        })
+    }
+
+    private fun releaseCompositor() {
+        compositor?.release()
+        compositor = null
     }
 
     private fun displayRotationDegrees() = when (display?.rotation) {
@@ -657,6 +740,7 @@ class MainActivity : AppCompatActivity() {
         probe = null
         dualCameraEngine?.release()
         dualCameraEngine = null
+        releaseCompositor()
         stopBroadcast()
         stopService(Intent(this, BroadcastService::class.java))
         broadcastLifecycle.stop()

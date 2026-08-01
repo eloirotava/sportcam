@@ -9,7 +9,14 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 import dev.cascam.config.VideoCodec
 
-class HlsTransport(serverUrl: String, streamKey: String, private val videoCodec: VideoCodec, private val onStatus: (String) -> Unit) : MediaTransport {
+class HlsTransport(
+    serverUrl: String,
+    streamKey: String,
+    private val videoCodec: VideoCodec,
+    /** O YouTube aceita de 1 a 4 s por segmento, e o segmento entra inteiro na latência. */
+    private val segmentMillis: Int = 2_000,
+    private val onStatus: (String) -> Unit,
+) : MediaTransport {
     private val uploadPrefix = buildPrefix(serverUrl, streamKey)
     private val uploader = Executors.newSingleThreadExecutor()
     private val segment = ByteArrayOutputStream()
@@ -33,7 +40,7 @@ class HlsTransport(serverUrl: String, streamKey: String, private val videoCodec:
 
     @Synchronized override fun sendVideo(nals: List<ByteArray>, timestampMs: Int, keyFrame: Boolean) {
         if (closed) return
-        if (keyFrame && segmentStartMs >= 0 && timestampMs - segmentStartMs >= SEGMENT_MS) finishSegment(timestampMs)
+        if (keyFrame && segmentStartMs >= 0 && timestampMs - segmentStartMs >= segmentMillis) finishSegment(timestampMs)
         if (segmentStartMs < 0) {
             if (!keyFrame) return
             startSegment(timestampMs)
@@ -164,7 +171,6 @@ class HlsTransport(serverUrl: String, streamKey: String, private val videoCodec:
         private const val VIDEO_PID = 0x100
         private const val AUDIO_PID = 0x101
         private const val PMT_PID = 0x1000
-        private const val SEGMENT_MS = 2_000
         private const val WINDOW = 6
 
         private fun buildPrefix(server: String, key: String): String {
