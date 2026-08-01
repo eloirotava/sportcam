@@ -3,7 +3,6 @@ package dev.cascam.camera
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
-import android.graphics.Rect
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -20,7 +19,6 @@ import android.os.HandlerThread
 import android.util.Size
 import android.view.Surface
 import java.util.concurrent.Executor
-import kotlin.math.roundToInt
 
 /**
  * Captura simultânea de dois sensores físicos da mesma câmera lógica.
@@ -60,7 +58,6 @@ class DualCameraEngine(
     private var courtOutput: Surface? = null
     private var scoreboardOutput: Surface? = null
     private var rotationDegrees = 0
-    private var scoreboardZoom = 1f
     private var courtTargetWidth = COURT_TARGET_WIDTH
     private var scoreboardTargetWidth = SCOREBOARD_TARGET_WIDTH
 
@@ -90,11 +87,10 @@ class DualCameraEngine(
      * entrega bitmaps convertidos, que é o caminho em CPU.
      */
     @SuppressLint("MissingPermission")
-    fun start(plan: Plan, displayRotationDegrees: Int, scoreboardZoomRatio: Float, outputs: Pair<Surface, Surface>? = null) {
+    fun start(plan: Plan, rotation: Int, outputs: Pair<Surface, Surface>? = null) {
         stop()
         this.plan = plan
-        this.scoreboardZoom = scoreboardZoomRatio
-        rotationDegrees = rotationFor(plan.logicalId, displayRotationDegrees)
+        rotationDegrees = ((rotation % 360) + 360) % 360
         running = true
         frameCounts.clear()
         handler.post {
@@ -119,11 +115,6 @@ class DualCameraEngine(
                 fail("permissão de câmera negada")
             }
         }
-    }
-
-    fun setScoreboardZoom(ratio: Float) {
-        scoreboardZoom = ratio
-        handler.post { applyRequest() }
     }
 
     fun stop() {
@@ -204,38 +195,12 @@ class DualCameraEngine(
                 // perdido de graça, então volta desligada.
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             }
-            applyScoreboardZoom(builder, plan)
             configured.setRepeatingRequest(builder.build(), null, handler)
         } catch (error: CameraAccessException) {
             fail("setRepeatingRequest falhou: ${error.message}")
         } catch (error: IllegalStateException) {
             fail("sessão encerrada antes de capturar: ${error.message}")
         }
-    }
-
-    private fun applyScoreboardZoom(builder: CaptureRequest.Builder, plan: Plan) {
-        if (scoreboardZoom <= 1.01f) return
-        when (plan.perPhysicalZoom) {
-            PerPhysicalZoom.ZOOM_RATIO ->
-                builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, scoreboardZoom, plan.scoreboardPhysicalId)
-            PerPhysicalZoom.CROP_REGION -> cropRegionFor(plan.scoreboardPhysicalId, scoreboardZoom)?.let {
-                builder.setPhysicalCameraKey(CaptureRequest.SCALER_CROP_REGION, it, plan.scoreboardPhysicalId)
-            }
-            // Sem chave por sensor, aplicar zoom aqui mexeria também na quadra: o recorte do placar
-            // fica por conta dos quatro cantos da composição, que já cortam a imagem entregue.
-            PerPhysicalZoom.NONE -> Unit
-        }
-    }
-
-    private fun cropRegionFor(physicalId: String, zoom: Float): Rect? {
-        val active = runCatching {
-            manager.getCameraCharacteristics(physicalId).get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-        }.getOrNull() ?: return null
-        val width = (active.width() / zoom).roundToInt().coerceAtLeast(64)
-        val height = (active.height() / zoom).roundToInt().coerceAtLeast(64)
-        val left = active.left + (active.width() - width) / 2
-        val top = active.top + (active.height() - height) / 2
-        return Rect(left, top, left + width, top + height)
     }
 
     // ---------------------------------------------------------------- quadros

@@ -15,7 +15,6 @@ class BroadcastConfigurationStore(context: Context) {
         cropPanY = preferences.getFloat("crop_pan_y", 0f),
         scoreboardCorners = decodeCorners(preferences.getString("scoreboard_corners", null)),
         scoreboardDestination = decodeRect(preferences.getString("scoreboard_destination", null)),
-        scoreboardZoom = preferences.getFloat("scoreboard_zoom", 1f),
         protocol = runCatching {
             BroadcastProtocol.valueOf(preferences.getString("broadcast_protocol", null).orEmpty())
         }.getOrDefault(BroadcastProtocol.RTMPS),
@@ -40,6 +39,9 @@ class BroadcastConfigurationStore(context: Context) {
         compositionEngine = runCatching {
             CompositionEngine.valueOf(preferences.getString("composition_engine", null).orEmpty())
         }.getOrDefault(CompositionEngine.CPU),
+        frameRotation = runCatching {
+            FrameRotation.valueOf(preferences.getString("frame_rotation", null).orEmpty())
+        }.getOrDefault(FrameRotation.AUTO),
     )
 
     fun save(configuration: BroadcastConfiguration) {
@@ -51,7 +53,6 @@ class BroadcastConfigurationStore(context: Context) {
             .putFloat("crop_pan_y", configuration.cropPanY)
             .putString("scoreboard_corners", configuration.scoreboardCorners.joinToString(";") { "${it.x},${it.y}" })
             .putString("scoreboard_destination", with(configuration.scoreboardDestination) { "$left,$top,$right,$bottom" })
-            .putFloat("scoreboard_zoom", configuration.scoreboardZoom)
             .putString("broadcast_protocol", configuration.protocol.name)
             .putString("video_codec", configuration.videoCodec.name)
             .putString("bitrate_preset", configuration.bitratePreset.name)
@@ -63,6 +64,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("live_privacy", configuration.livePrivacy.name)
             .putString("live_latency", configuration.liveLatency.name)
             .putString("composition_engine", configuration.compositionEngine.name)
+            .putString("frame_rotation", configuration.frameRotation.name)
             .apply()
     }
 

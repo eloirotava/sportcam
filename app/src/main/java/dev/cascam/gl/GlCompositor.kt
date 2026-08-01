@@ -85,9 +85,6 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 scoreboardSurface = Surface(scoreboardStream)
                 startedAtNanos = System.nanoTime()
                 ready = true
-                if (rotationDegrees % 180 != 0) {
-                    onStatus("Aviso: rotação de $rotationDegrees° na composição GPU distorce a proporção; use CPU nessa orientação.")
-                }
             }.onSuccess { onReady() }.onFailure { onStatus("Composição GPU indisponível: ${it.message}") }
         }
     }
@@ -149,8 +146,14 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         if (targets.isEmpty()) return
 
         val config = configuration
-        val rotation = Homography.rotation(rotationDegrees)
-        val crop = NormalizedRect.adjustable16x9(captureSize.width, captureSize.height, config.cropZoom, config.cropPanX, config.cropPanY)
+        val rotation = Homography.inverseRotation(rotationDegrees)
+        // O recorte vale sobre a imagem **já girada**, como no caminho em CPU, que gira o bitmap
+        // antes de recortar. A 90° e 270° isso troca largura por altura: calcular o recorte sobre a
+        // captura crua daria um enquadramento completamente diferente do que a CPU produz.
+        val quarterTurn = rotationDegrees % 180 != 0
+        val cropWidth = if (quarterTurn) captureSize.height else captureSize.width
+        val cropHeight = if (quarterTurn) captureSize.width else captureSize.height
+        val crop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
         val courtMap = Homography.multiply(rotation, Homography.unitSquareTo(crop.left, crop.top, crop.width, crop.height))
         val scoreboardMap = Homography.multiply(rotation, Homography.unitSquareTo(config.scoreboardCorners))
         val destination = config.scoreboardDestination

@@ -41,6 +41,13 @@ class CompositionOverlayView @JvmOverloads constructor(
     var onCropChanged: ((zoom: Float, panX: Float, panY: Float) -> Unit)? = null
 
     /**
+     * Arrasto em área vazia no modo placar. Com a tela ampliada para posicionar os cantos, o
+     * quadrilátero quase nunca começa em cima do placar, e sem poder deslocar a visualização o zoom
+     * só serve quando o placar já está no centro. Quem hospeda a view traduz isso em deslocamento.
+     */
+    var onPanRequested: ((dx: Float, dy: Float) -> Unit)? = null
+
+    /**
      * Ampliação aplicada à view por quem a hospeda. As alças e os traços são divididos por ela para
      * continuarem do mesmo tamanho na tela: com a view a 4×, uma alça de 14 px viraria 56 px e
      * cobriria justamente o canto que se está tentando enxergar.
@@ -88,11 +95,26 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun drawCrop(canvas: Canvas) {
-        val crop = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
+        val crop = cropRect()
         canvas.drawRect(crop.left * width, crop.top * height, crop.right * width, crop.bottom * height, cropPaint)
         canvas.drawCircle(crop.left * width, crop.top * height, handleRadius, cropHandlePaint)
         canvas.drawCircle(crop.right * width, crop.bottom * height, handleRadius, cropHandlePaint)
+        // O retângulo verde é o quadro que vai ao ar, então a posição do placar é ajustada dentro
+        // dele: é o único lugar da tela onde ela significa o que vai significar na transmissão.
+        val left = destinationPixelX(destination.left)
+        val top = destinationPixelY(destination.top)
+        val right = destinationPixelX(destination.right)
+        val bottom = destinationPixelY(destination.bottom)
+        canvas.drawRect(left, top, right, bottom, destinationPaint)
+        canvas.drawCircle(left, top, handleRadius, destinationHandlePaint)
+        canvas.drawCircle(right, bottom, handleRadius, destinationHandlePaint)
     }
+
+    private fun cropRect() = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
+
+    private fun destinationPixelX(value: Float): Float = cropRect().let { (it.left + value * it.width) * width }
+
+    private fun destinationPixelY(value: Float): Float = cropRect().let { (it.top + value * it.height) * height }
 
     private fun drawScoreboard(canvas: Canvas) {
         val path = Path()
@@ -102,12 +124,6 @@ class CompositionOverlayView @JvmOverloads constructor(
             canvas.drawCircle(x, y, handleRadius, handlePaint)
         }
         path.close(); canvas.drawPath(path, quadPaint)
-        canvas.drawRect(
-            destination.left * width, destination.top * height,
-            destination.right * width, destination.bottom * height, destinationPaint,
-        )
-        canvas.drawCircle(destination.left * width, destination.top * height, handleRadius, destinationHandlePaint)
-        canvas.drawCircle(destination.right * width, destination.bottom * height, handleRadius, destinationHandlePaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -116,28 +132,38 @@ class CompositionOverlayView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 lastX = event.x; lastY = event.y
-                if (mode == Mode.COURT) activeCropCorner = nearestCropCorner(event.x, event.y)
-                if (mode == Mode.SCOREBOARD) {
+                if (mode == Mode.COURT) {
+                    // O destino tem prioridade: ele fica dentro do recorte, e sem isso arrastar
+                    // dentro dele moveria o recorte inteiro por baixo.
                     val destinationCorner = nearestDestinationCorner(event.x, event.y)
                     editingDestination = destinationCorner != null || insideDestination(event.x, event.y)
-                    activeCorner = if (editingDestination) {
-                        destinationCorner ?: -1
-                    } else {
-                        nearestCorner(event.x, event.y) ?: if (insideScoreboard(event.x, event.y)) -1 else null
-                    }
+                    activeCorner = if (editingDestination) destinationCorner ?: -1 else null
+                    activeCropCorner = if (editingDestination) null else nearestCropCorner(event.x, event.y)
+                }
+                if (mode == Mode.SCOREBOARD) {
+                    editingDestination = false
+                    activeCorner = nearestCorner(event.x, event.y)
+                        ?: if (insideScoreboard(event.x, event.y)) -1 else null
                 }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (mode == Mode.COURT && !scaleDetector.isInProgress) {
-                    activeCropCorner?.let { resizeCrop(it, event.x, event.y) }
-                        ?: moveCrop(event.x - lastX, event.y - lastY)
-                }
-                if (mode == Mode.SCOREBOARD) activeCorner?.let {
-                    if (editingDestination) {
-                        if (it == -1) moveDestination(event.x - lastX, event.y - lastY) else resizeDestination(it, event.x, event.y)
+                    val destinationCorner = activeCorner
+                    if (editingDestination && destinationCorner != null) {
+                        if (destinationCorner == -1) moveDestination(event.x - lastX, event.y - lastY)
+                        else resizeDestination(destinationCorner, event.x, event.y)
                     } else {
-                        if (it == -1) moveScoreboard(event.x - lastX, event.y - lastY) else resizeScoreboard(it, event.x, event.y)
+                        activeCropCorner?.let { resizeCrop(it, event.x, event.y) }
+                            ?: moveCrop(event.x - lastX, event.y - lastY)
+                    }
+                }
+                if (mode == Mode.SCOREBOARD) {
+                    val corner = activeCorner
+                    when {
+                        corner == null -> onPanRequested?.invoke(event.x - lastX, event.y - lastY)
+                        corner == -1 -> moveScoreboard(event.x - lastX, event.y - lastY)
+                        else -> resizeScoreboard(corner, event.x, event.y)
                     }
                 }
                 lastX = event.x; lastY = event.y
@@ -168,7 +194,10 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun nearestDestinationCorner(x: Float, y: Float): Int? {
-        val points = listOf(destination.left * width to destination.top * height, destination.right * width to destination.bottom * height)
+        val points = listOf(
+            destinationPixelX(destination.left) to destinationPixelY(destination.top),
+            destinationPixelX(destination.right) to destinationPixelY(destination.bottom),
+        )
         return points.indices.minByOrNull { distanceSquared(x, y, points[it].first, points[it].second) }
             ?.takeIf { distanceSquared(x, y, points[it].first, points[it].second) <= touchRadius * touchRadius }
     }
@@ -244,11 +273,21 @@ class CompositionOverlayView @JvmOverloads constructor(
         invalidate()
     }
 
-    private fun insideDestination(x: Float, y: Float): Boolean =
-        x / width in destination.left..destination.right && y / height in destination.top..destination.bottom
+    private fun insideDestination(x: Float, y: Float): Boolean {
+        val point = destinationNormalized(x, y)
+        return point.first in destination.left..destination.right && point.second in destination.top..destination.bottom
+    }
+
+    /** Converte um ponto da tela para a fração do retângulo verde, que é o quadro transmitido. */
+    private fun destinationNormalized(x: Float, y: Float): Pair<Float, Float> {
+        val crop = cropRect()
+        val normalizedX = if (crop.width > 0f) (x / width - crop.left) / crop.width else 0f
+        val normalizedY = if (crop.height > 0f) (y / height - crop.top) / crop.height else 0f
+        return normalizedX.coerceIn(0f, 1f) to normalizedY.coerceIn(0f, 1f)
+    }
 
     private fun resizeDestination(corner: Int, x: Float, y: Float) {
-        val moving = normalized(x, y)
+        val moving = destinationNormalized(x, y).let { NormalizedPoint(it.first, it.second) }
         val fixedX = if (corner == 0) destination.right else destination.left
         val fixedY = if (corner == 0) destination.bottom else destination.top
         val left = minOf(moving.x, fixedX); val right = maxOf(moving.x, fixedX)
@@ -260,8 +299,9 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun moveDestination(dx: Float, dy: Float) {
-        val normalizedDx = (dx / width).coerceIn(-destination.left, 1f - destination.right)
-        val normalizedDy = (dy / height).coerceIn(-destination.top, 1f - destination.bottom)
+        val crop = cropRect()
+        val normalizedDx = (dx / width / crop.width).coerceIn(-destination.left, 1f - destination.right)
+        val normalizedDy = (dy / height / crop.height).coerceIn(-destination.top, 1f - destination.bottom)
         destination = NormalizedRect(
             destination.left + normalizedDx, destination.top + normalizedDy,
             destination.right + normalizedDx, destination.bottom + normalizedDy,

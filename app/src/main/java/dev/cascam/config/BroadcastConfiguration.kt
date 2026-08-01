@@ -11,7 +11,6 @@ data class BroadcastConfiguration(
     val cropPanY: Float = 0f,
     val scoreboardCorners: List<NormalizedPoint> = DEFAULT_SCOREBOARD_CORNERS,
     val scoreboardDestination: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
-    val scoreboardZoom: Float = 1f,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val videoCodec: VideoCodec = VideoCodec.H264,
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
@@ -23,6 +22,7 @@ data class BroadcastConfiguration(
     val livePrivacy: LivePrivacy = LivePrivacy.UNLISTED,
     val liveLatency: LiveLatency = LiveLatency.LOW,
     val compositionEngine: CompositionEngine = CompositionEngine.CPU,
+    val frameRotation: FrameRotation = FrameRotation.AUTO,
 )
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
@@ -35,6 +35,19 @@ enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
  */
 enum class CompositionEngine(val label: String) {
     CPU("CPU · Canvas"), GPU("GPU · OpenGL"),
+}
+
+/**
+ * Giro aplicado à imagem da câmera antes de compor. O automático deriva da orientação do sensor e
+ * acerta na maioria dos casos, mas cada HAL entrega o buffer do seu jeito e não há como testar todos
+ * — por isso os valores fixos ficam à mão, para corrigir na tela em vez de esperar outra versão.
+ */
+enum class FrameRotation(val label: String, val degrees: Int?) {
+    AUTO("Automática", null),
+    NONE("0°", 0),
+    QUARTER("90° horário", 90),
+    HALF("180°", 180),
+    THREE_QUARTERS("90° anti-horário", 270),
 }
 enum class VideoCodec(val label: String) { H264("H.264 / AVC"), H265("H.265 / HEVC") }
 enum class BitratePreset(val label: String, val bitsPerSecond: Int?) {

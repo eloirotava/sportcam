@@ -54,11 +54,18 @@ object Homography {
     fun unitSquareTo(left: Float, top: Float, width: Float, height: Float): FloatArray =
         floatArrayOf(width, 0f, 0f, 0f, height, 0f, left, top, 1f)
 
-    /** Rotação em torno do centro da imagem, para compor com os mapeamentos acima. */
-    fun rotation(degrees: Int): FloatArray = when (((degrees % 360) + 360) % 360) {
-        90 -> floatArrayOf(0f, 1f, 0f, -1f, 0f, 0f, 1f, 0f, 1f)
+    /**
+     * Rotação **inversa**, para compor com os mapeamentos acima.
+     *
+     * O shader recebe um mapeamento de destino para origem, então girar a coordenada por θ faz a
+     * imagem aparecer girada por −θ. Como o caminho em CPU usa `postRotate(θ)`, que gira a imagem
+     * por θ no sentido horário, aqui as entradas de 90 e 270 são trocadas: assim os dois caminhos
+     * entendem o mesmo número da mesma forma, e trocar de CPU para GPU não vira o vídeo.
+     */
+    fun inverseRotation(degrees: Int): FloatArray = when (((degrees % 360) + 360) % 360) {
+        90 -> floatArrayOf(0f, -1f, 0f, 1f, 0f, 0f, 0f, 1f, 1f)
         180 -> floatArrayOf(-1f, 0f, 0f, 0f, -1f, 0f, 1f, 1f, 1f)
-        270 -> floatArrayOf(0f, -1f, 0f, 1f, 0f, 0f, 0f, 1f, 1f)
+        270 -> floatArrayOf(0f, 1f, 0f, -1f, 0f, 0f, 1f, 0f, 1f)
         else -> floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
     }
 

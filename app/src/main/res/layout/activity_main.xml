@@ -32,6 +32,9 @@
                     <TextView style="@style/PanelLabel" android:text="Composição" />
                     <Spinner android:id="@+id/composition_engine" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView android:id="@+id/composition_hint" style="@style/PanelHint" android:text="CPU converte cada quadro e desenha em Canvas. GPU deixa a câmera escrever em textura e compõe em OpenGL, sem passar pelo processador." />
+                    <TextView style="@style/PanelLabel" android:text="Rotação da imagem" />
+                    <Spinner android:id="@+id/frame_rotation" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelHint" android:text="Deixe em Automática. Se a composição sair virada, corrija aqui." />
                     <TextView style="@style/PanelLabel" android:text="Codec de vídeo" />
                     <Spinner android:id="@+id/video_codec" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />
@@ -82,7 +85,7 @@
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar quadra" />
-                    <TextView style="@style/PanelText" android:text="Arraste o retângulo verde para mover. Arraste uma das duas bolinhas diagonais para redimensionar; a saída permanece 16:9." />
+                    <TextView style="@style/PanelText" android:text="Verde: arraste para mover, ou use as duas bolinhas diagonais para redimensionar; a saída permanece 16:9. Azul: onde o placar aparece dentro do quadro que vai ao ar." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
@@ -94,12 +97,9 @@
 
                 <LinearLayout android:id="@+id/panel_scoreboard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar placar" />
-                    <TextView style="@style/PanelText" android:text="Amarelo: ajuste os quatro cantos do placar inclinado; ele será planificado. Azul: ajuste o retângulo de tamanho e posição na composição pelas duas bolinhas diagonais." />
+                    <TextView style="@style/PanelText" android:text="Amarelo: ajuste os quatro cantos do placar inclinado; ele será planificado. A posição na composição fica na aba QUADRA, dentro do retângulo verde." />
                     <TextView style="@style/PanelLabel" android:text="Câmera do placar" />
                     <Spinner android:id="@+id/scoreboard_camera" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Zoom óptico/digital da câmera" />
-                    <SeekBar android:id="@+id/scoreboard_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
-                    <TextView android:id="@+id/scoreboard_zoom_status" style="@style/PanelHint" android:text="Zoom: 1.0×" />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/scoreboard_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
                     <TextView android:id="@+id/scoreboard_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />

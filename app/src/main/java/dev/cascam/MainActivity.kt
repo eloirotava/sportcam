@@ -40,6 +40,7 @@ import dev.cascam.camera.CameraXSupport
 import dev.cascam.camera.DualCameraEngine
 import dev.cascam.camera.DualCameraProbe
 import dev.cascam.config.CompositionEngine
+import dev.cascam.config.FrameRotation
 import dev.cascam.gl.GlCompositor
 import android.view.SurfaceHolder
 import dev.cascam.config.BroadcastConfiguration
@@ -83,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var dualCameraEngine: DualCameraEngine? = null
     private var compositor: GlCompositor? = null
     private var encoderSurface: Surface? = null
+    private var scoreboardPanX = 0f
+    private var scoreboardPanY = 0f
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -126,6 +129,14 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        binding.frameRotation.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, FrameRotation.entries.map { it.label })
+        binding.frameRotation.setSelection(FrameRotation.entries.indexOf(configuration.frameRotation))
+        binding.frameRotation.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (screen == Screen.BROADCAST) showScreen(Screen.BROADCAST)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         binding.bitratePreset.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BitratePreset.entries.map { it.label })
         binding.bitratePreset.setSelection(BitratePreset.entries.indexOf(configuration.bitratePreset))
         binding.livePrivacy.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, LivePrivacy.entries.map { it.label })
@@ -147,7 +158,6 @@ class MainActivity : AppCompatActivity() {
         binding.compositionOverlay.setCrop(configuration.cropZoom, configuration.cropPanX, configuration.cropPanY)
         binding.compositionOverlay.setScoreboardCorners(configuration.scoreboardCorners)
         binding.compositionOverlay.setScoreboardDestination(configuration.scoreboardDestination)
-        binding.scoreboardZoom.progress = ((configuration.scoreboardZoom - 1f) * 10f).toInt().coerceIn(0, 70)
         updateZoomLabels()
     }
 
@@ -176,17 +186,10 @@ class MainActivity : AppCompatActivity() {
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
+        binding.compositionOverlay.onPanRequested = { dx, dy -> panScoreboardView(dx, dy) }
 
         binding.scoreboardViewZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = applyScoreboardViewZoom()
-            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-        })
-        binding.scoreboardZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                updateZoomLabels()
-                if (fromUser) applyScoreboardZoom()
-            }
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
@@ -265,7 +268,6 @@ class MainActivity : AppCompatActivity() {
             cropZoom = cropZoom, cropPanX = cropPanX, cropPanY = cropPanY,
             scoreboardCorners = binding.compositionOverlay.scoreboardCorners(),
             scoreboardDestination = binding.compositionOverlay.scoreboardDestination(),
-            scoreboardZoom = scoreboardZoom(),
             protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             videoCodec = VideoCodec.entries[binding.videoCodec.selectedItemPosition],
             bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
@@ -277,6 +279,7 @@ class MainActivity : AppCompatActivity() {
             livePrivacy = LivePrivacy.entries[binding.livePrivacy.selectedItemPosition],
             liveLatency = LiveLatency.entries[binding.liveLatency.selectedItemPosition],
             compositionEngine = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition],
+            frameRotation = FrameRotation.entries[binding.frameRotation.selectedItemPosition],
         )
     }
 
@@ -441,26 +444,47 @@ class MainActivity : AppCompatActivity() {
      * continuam normalizadas, e o Android já entrega o toque em coordenadas locais da view, então
      * ampliar a view multiplica a precisão do arrasto sem tocar na matemática do overlay.
      *
-     * O pivô é o centro do quadrilátero atual, que é o jeito mais simples de garantir que o placar
-     * não saia da tela ao ampliar.
+     * O pivô fica no centro da moldura e o deslocamento é livre, porque o placar quase nunca está
+     * no meio do quadro — ampliar em cima de um ponto fixo só resolveria o caso centrado.
      */
     private fun applyScoreboardViewZoom() {
         val zoom = if (screen == Screen.SCOREBOARD) scoreboardViewZoom() else 1f
-        val corners = binding.compositionOverlay.scoreboardCorners()
-        val pivotX = corners.map { it.x }.average().toFloat() * binding.compositionOverlay.width
-        val pivotY = corners.map { it.y }.average().toFloat() * binding.compositionOverlay.height
+        if (zoom <= 1.01f) { scoreboardPanX = 0f; scoreboardPanY = 0f }
+        clampScoreboardPan(zoom)
         listOf<View>(binding.preview, binding.compositionOverlay).forEach { view ->
-            view.pivotX = pivotX
-            view.pivotY = pivotY
+            view.pivotX = view.width / 2f
+            view.pivotY = view.height / 2f
             view.scaleX = zoom
             view.scaleY = zoom
+            view.translationX = scoreboardPanX
+            view.translationY = scoreboardPanY
         }
         binding.compositionOverlay.setDisplayScale(zoom)
         binding.scoreboardViewZoomStatus.text = if (zoom > 1.01f) {
-            "Tela: %.1f× · só amplia a visualização, não muda o que é transmitido.".format(zoom)
+            "Tela: %.1f× · arraste fora do quadrilátero para deslocar.".format(zoom)
         } else {
-            "Tela: 1.0× · só amplia a visualização, não muda o que é transmitido."
+            "Tela: 1.0× · amplie para posicionar os cantos com precisão."
         }
+    }
+
+    /**
+     * O arrasto chega em coordenadas locais da view, que já estão divididas pela ampliação; para o
+     * conteúdo acompanhar o dedo na tela, o deslocamento volta a ser multiplicado por ela.
+     */
+    private fun panScoreboardView(dx: Float, dy: Float) {
+        val zoom = scoreboardViewZoom()
+        if (screen != Screen.SCOREBOARD || zoom <= 1.01f) return
+        scoreboardPanX += dx * zoom
+        scoreboardPanY += dy * zoom
+        applyScoreboardViewZoom()
+    }
+
+    /** Impede que a imagem seja arrastada para fora da moldura, deixando faixa preta na tela. */
+    private fun clampScoreboardPan(zoom: Float) {
+        val limitX = (zoom - 1f) * binding.compositionOverlay.width / 2f
+        val limitY = (zoom - 1f) * binding.compositionOverlay.height / 2f
+        scoreboardPanX = scoreboardPanX.coerceIn(-limitX, limitX)
+        scoreboardPanY = scoreboardPanY.coerceIn(-limitY, limitY)
     }
 
     private fun resetCourtTransform() {
@@ -540,30 +564,9 @@ class MainActivity : AppCompatActivity() {
         binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
     }
 
-    private fun scoreboardZoom() = 1f + binding.scoreboardZoom.progress / 10f
     private fun updateZoomLabels() {
-        binding.scoreboardZoomStatus.text = "Zoom: %.1f×".format(scoreboardZoom())
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
     }
-    private fun applyScoreboardZoom() {
-        dualCameraEngine?.takeIf { it.isRunning }?.let { engine ->
-            engine.setScoreboardZoom(scoreboardZoom())
-            return
-        }
-        if (screen != Screen.COURT) boundCamera?.let { camera ->
-            val maximum = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: scoreboardZoom()
-            camera.cameraControl.setZoomRatio(scoreboardZoom().coerceAtMost(maximum))
-        }
-    }
-
-    private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-    private fun requestCameraIfNeeded() {
-        val missing = listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
-    }
-
     @ExperimentalCamera2Interop
     private fun startCamera(cameraKey: String?) {
         val future = ProcessCameraProvider.getInstance(this)
@@ -581,7 +584,6 @@ class MainActivity : AppCompatActivity() {
             val preview = previewBuilder.build().also { it.surfaceProvider = binding.preview.surfaceProvider }
             provider.unbindAll()
             boundCamera = provider.bindToLifecycle(this, selector, preview)
-            applyScoreboardZoom()
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -647,8 +649,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     "Composição ativa ($sourceDescription). Verificando se os fluxos são distintos…"
                 }
-                applyScoreboardZoom()
-            } catch (error: RuntimeException) {
+                } catch (error: RuntimeException) {
                 provider.unbindAll()
                 boundCamera = provider.bindToLifecycle(broadcastLifecycle, courtSelector, courtAnalysis)
                 val reason = generateSequence<Throwable>(error) { it.cause }.last()
@@ -680,7 +681,7 @@ class MainActivity : AppCompatActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             runCatching { future.get().unbindAll() }
-            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, displayRotationDegrees(), scoreboardZoom())
+            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, compositionRotation(engine, plan))
         }, ContextCompat.getMainExecutor(this))
         return true
     }
@@ -694,7 +695,7 @@ class MainActivity : AppCompatActivity() {
         val created = GlCompositor { status -> runOnUiThread { binding.broadcastStatus.text = status } }
         compositor = created
         created.configure(readForm())
-        created.start(plan.size, engine.rotationFor(plan.logicalId, displayRotationDegrees())) {
+        created.start(plan.size, compositionRotation(engine, plan)) {
             runOnUiThread {
                 val courtSurface = created.courtSurface
                 val scoreboardSurface = created.scoreboardSurface
@@ -703,7 +704,7 @@ class MainActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 attachGpuPreview(created)
-                engine.start(plan, displayRotationDegrees(), scoreboardZoom(), courtSurface to scoreboardSurface)
+                engine.start(plan, compositionRotation(engine, plan), courtSurface to scoreboardSurface)
             }
         }
     }
@@ -730,6 +731,11 @@ class MainActivity : AppCompatActivity() {
         compositor?.release()
         compositor = null
     }
+
+    /** Escolha do usuário quando existe; senão a conta automática a partir da orientação do sensor. */
+    private fun compositionRotation(engine: DualCameraEngine, plan: DualCameraEngine.Plan): Int =
+        FrameRotation.entries[binding.frameRotation.selectedItemPosition].degrees
+            ?: engine.rotationFor(plan.logicalId, displayRotationDegrees())
 
     private fun displayRotationDegrees() = when (display?.rotation) {
         Surface.ROTATION_90 -> 90
