@@ -175,6 +175,11 @@ class MainActivity : AppCompatActivity() {
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
 
+        binding.scoreboardViewZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) = applyScoreboardViewZoom()
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
         binding.scoreboardZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 updateZoomLabels()
@@ -230,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         binding.preview.visibility = if (target == Screen.BROADCAST || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
         binding.scoreboardPreviewContainer.visibility = View.GONE
         resetCourtTransform()
+        applyScoreboardViewZoom()
         if (hasCameraPermission()) when (target) {
             Screen.BROADCAST -> startCompositionPreview()
             // O teste precisa das câmeras livres: qualquer bind anterior seria confundido com falha do par.
@@ -423,6 +429,36 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { binding.liveHealth.text = "Não consegui consultar: ${error.message}" }
             }
         }.start()
+    }
+
+    private fun scoreboardViewZoom() = 1f + binding.scoreboardViewZoom.progress / 10f
+
+    /**
+     * Ampliação só da visualização, para colocar os quatro cantos num placar que ocupa poucos pixels
+     * do quadro. Nada aqui muda a captura nem o que é transmitido: as coordenadas dos cantos
+     * continuam normalizadas, e o Android já entrega o toque em coordenadas locais da view, então
+     * ampliar a view multiplica a precisão do arrasto sem tocar na matemática do overlay.
+     *
+     * O pivô é o centro do quadrilátero atual, que é o jeito mais simples de garantir que o placar
+     * não saia da tela ao ampliar.
+     */
+    private fun applyScoreboardViewZoom() {
+        val zoom = if (screen == Screen.SCOREBOARD) scoreboardViewZoom() else 1f
+        val corners = binding.compositionOverlay.scoreboardCorners()
+        val pivotX = corners.map { it.x }.average().toFloat() * binding.compositionOverlay.width
+        val pivotY = corners.map { it.y }.average().toFloat() * binding.compositionOverlay.height
+        listOf<View>(binding.preview, binding.compositionOverlay).forEach { view ->
+            view.pivotX = pivotX
+            view.pivotY = pivotY
+            view.scaleX = zoom
+            view.scaleY = zoom
+        }
+        binding.compositionOverlay.setDisplayScale(zoom)
+        binding.scoreboardViewZoomStatus.text = if (zoom > 1.01f) {
+            "Tela: %.1f× · só amplia a visualização, não muda o que é transmitido.".format(zoom)
+        } else {
+            "Tela: 1.0× · só amplia a visualização, não muda o que é transmitido."
+        }
     }
 
     private fun resetCourtTransform() {

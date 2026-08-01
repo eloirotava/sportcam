@@ -26,6 +26,7 @@ class CompositionOverlayView @JvmOverloads constructor(
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 196, 77) }
     private val destinationPaint = strokePaint(Color.rgb(65, 170, 255))
     private val destinationHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(65, 170, 255) }
+    private val strokePaints = listOf(cropPaint, quadPaint, destinationPaint)
     private val corners = DEFAULT_SCOREBOARD_CORNERS.toMutableList()
     private var destination = DEFAULT_SCOREBOARD_DESTINATION
     private var mode = Mode.COMPOSITION
@@ -38,6 +39,22 @@ class CompositionOverlayView @JvmOverloads constructor(
     private var lastX = 0f
     private var lastY = 0f
     var onCropChanged: ((zoom: Float, panX: Float, panY: Float) -> Unit)? = null
+
+    /**
+     * Ampliação aplicada à view por quem a hospeda. As alças e os traços são divididos por ela para
+     * continuarem do mesmo tamanho na tela: com a view a 4×, uma alça de 14 px viraria 56 px e
+     * cobriria justamente o canto que se está tentando enxergar.
+     */
+    private var displayScale = 1f
+
+    fun setDisplayScale(value: Float) {
+        displayScale = value.coerceAtLeast(1f)
+        strokePaints.forEach { it.strokeWidth = STROKE_WIDTH / displayScale }
+        invalidate()
+    }
+
+    private val handleRadius: Float get() = HANDLE_RADIUS / displayScale
+    private val touchRadius: Float get() = TOUCH_RADIUS / displayScale
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -73,8 +90,8 @@ class CompositionOverlayView @JvmOverloads constructor(
     private fun drawCrop(canvas: Canvas) {
         val crop = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
         canvas.drawRect(crop.left * width, crop.top * height, crop.right * width, crop.bottom * height, cropPaint)
-        canvas.drawCircle(crop.left * width, crop.top * height, 14f, cropHandlePaint)
-        canvas.drawCircle(crop.right * width, crop.bottom * height, 14f, cropHandlePaint)
+        canvas.drawCircle(crop.left * width, crop.top * height, handleRadius, cropHandlePaint)
+        canvas.drawCircle(crop.right * width, crop.bottom * height, handleRadius, cropHandlePaint)
     }
 
     private fun drawScoreboard(canvas: Canvas) {
@@ -82,15 +99,15 @@ class CompositionOverlayView @JvmOverloads constructor(
         corners.forEachIndexed { index, point ->
             val x = point.x * width; val y = point.y * height
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            canvas.drawCircle(x, y, 14f, handlePaint)
+            canvas.drawCircle(x, y, handleRadius, handlePaint)
         }
         path.close(); canvas.drawPath(path, quadPaint)
         canvas.drawRect(
             destination.left * width, destination.top * height,
             destination.right * width, destination.bottom * height, destinationPaint,
         )
-        canvas.drawCircle(destination.left * width, destination.top * height, 14f, destinationHandlePaint)
-        canvas.drawCircle(destination.right * width, destination.bottom * height, 14f, destinationHandlePaint)
+        canvas.drawCircle(destination.left * width, destination.top * height, handleRadius, destinationHandlePaint)
+        canvas.drawCircle(destination.right * width, destination.bottom * height, handleRadius, destinationHandlePaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -141,19 +158,19 @@ class CompositionOverlayView @JvmOverloads constructor(
     private fun notifyCropChanged() { invalidate(); onCropChanged?.invoke(cropZoom, cropPanX, cropPanY) }
     private fun nearestCorner(x: Float, y: Float): Int? = corners.indices.minByOrNull { i ->
         val dx = x - corners[i].x * width; val dy = y - corners[i].y * height; dx * dx + dy * dy
-    }?.takeIf { i -> distanceSquared(x, y, corners[i].x * width, corners[i].y * height) <= 56f * 56f }
+    }?.takeIf { i -> distanceSquared(x, y, corners[i].x * width, corners[i].y * height) <= touchRadius * touchRadius }
 
     private fun nearestCropCorner(x: Float, y: Float): Int? {
         val crop = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
         val points = listOf(crop.left * width to crop.top * height, crop.right * width to crop.bottom * height)
         return points.indices.minByOrNull { distanceSquared(x, y, points[it].first, points[it].second) }
-            ?.takeIf { distanceSquared(x, y, points[it].first, points[it].second) <= 56f * 56f }
+            ?.takeIf { distanceSquared(x, y, points[it].first, points[it].second) <= touchRadius * touchRadius }
     }
 
     private fun nearestDestinationCorner(x: Float, y: Float): Int? {
         val points = listOf(destination.left * width to destination.top * height, destination.right * width to destination.bottom * height)
         return points.indices.minByOrNull { distanceSquared(x, y, points[it].first, points[it].second) }
-            ?.takeIf { distanceSquared(x, y, points[it].first, points[it].second) <= 56f * 56f }
+            ?.takeIf { distanceSquared(x, y, points[it].first, points[it].second) <= touchRadius * touchRadius }
     }
 
     private fun resizeCrop(corner: Int, x: Float, y: Float) {
@@ -260,6 +277,12 @@ class CompositionOverlayView @JvmOverloads constructor(
     override fun performClick(): Boolean { super.performClick(); return true }
 
     private fun strokePaint(colorValue: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = colorValue; style = Paint.Style.STROKE; strokeWidth = 4f
+        color = colorValue; style = Paint.Style.STROKE; strokeWidth = STROKE_WIDTH
+    }
+
+    private companion object {
+        const val STROKE_WIDTH = 4f
+        const val HANDLE_RADIUS = 14f
+        const val TOUCH_RADIUS = 56f
     }
 }
