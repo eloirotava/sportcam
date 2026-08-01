@@ -9,6 +9,7 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
@@ -198,6 +199,10 @@ class DualCameraEngine(
                 addTarget(court)
                 addTarget(scoreboard)
                 set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                // O TEMPLATE_RECORD costuma vir com estabilização ligada, e ela cobra uma margem de
+                // recorte para ter para onde compensar o tremor. Em tripé isso é enquadramento
+                // perdido de graça, então volta desligada.
+                set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             }
             applyScoreboardZoom(builder, plan)
             configured.setRepeatingRequest(builder.build(), null, handler)

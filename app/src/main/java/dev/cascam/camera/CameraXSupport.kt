@@ -1,5 +1,7 @@
 package dev.cascam.camera
 
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
@@ -31,6 +33,9 @@ object CameraXSupport {
         val builder = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        Camera2Interop.Extender(builder).setCaptureRequestOption(
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+        )
         camera.physicalCameraId?.let { Camera2Interop.Extender(builder).setPhysicalCameraId(it) }
         return builder.build()
     }

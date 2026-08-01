@@ -6,6 +6,8 @@ import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
@@ -570,6 +572,11 @@ class MainActivity : AppCompatActivity() {
             val camera = cameraKey?.let(::cameraFor)
             val selector = camera?.let { selectorFor(it.logicalCameraId) } ?: CameraSelector.DEFAULT_BACK_CAMERA
             val previewBuilder = Preview.Builder()
+            // A prévia precisa enquadrar igual à transmissão; com estabilização só de um lado, o
+            // recorte que ela cobra deixaria os dois enquadramentos diferentes.
+            Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+            )
             camera?.physicalCameraId?.let { Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(it) }
             val preview = previewBuilder.build().also { it.surfaceProvider = binding.preview.surfaceProvider }
             provider.unbindAll()

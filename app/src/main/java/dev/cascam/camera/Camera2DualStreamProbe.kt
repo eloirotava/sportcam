@@ -7,6 +7,8 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image
@@ -147,6 +149,8 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
                 val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                     addTarget(readerA.surface)
                     addTarget(readerB.surface)
+                    // Mesmo ajuste da captura: medir com estabilização ligada mediria outro campo.
+                    set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                 }.build()
                 configured.setRepeatingRequest(request, null, handler)
                 startedAt = System.currentTimeMillis()
