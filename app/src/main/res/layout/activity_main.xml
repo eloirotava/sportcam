@@ -34,7 +34,7 @@
                     <TextView android:id="@+id/composition_hint" style="@style/PanelHint" android:text="CPU converte cada quadro e desenha em Canvas. GPU deixa a câmera escrever em textura e compõe em OpenGL, sem passar pelo processador." />
                     <TextView style="@style/PanelLabel" android:text="Rotação da imagem" />
                     <Spinner android:id="@+id/frame_rotation" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelHint" android:text="Deixe em Automática. Se a composição sair virada, corrija aqui." />
+                    <TextView style="@style/PanelHint" android:text="Vale só para a composição em GPU, que recebe o quadro pela SurfaceTexture e pode chegar já girado. Em CPU o giro é sempre automático." />
                     <TextView style="@style/PanelLabel" android:text="Codec de vídeo" />
                     <Spinner android:id="@+id/video_codec" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />
@@ -85,7 +85,7 @@
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar quadra" />
-                    <TextView style="@style/PanelText" android:text="Verde: arraste para mover, ou use as duas bolinhas diagonais para redimensionar; a saída permanece 16:9. Azul: onde o placar aparece dentro do quadro que vai ao ar." />
+                    <TextView style="@style/PanelText" android:text="Verde: arraste para mover, ou use as duas bolinhas diagonais para redimensionar; a saída permanece 16:9. Azul: onde o placar aparece dentro do quadro que vai ao ar. A linha no centro é o nível: fica verde com o celular na horizontal." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">

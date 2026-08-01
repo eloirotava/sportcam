@@ -13,6 +13,7 @@ import dev.cascam.geometry.NormalizedRect
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import kotlin.math.abs
 
 /**
  * Composição de quadra e placar na GPU.
@@ -148,9 +149,13 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val config = configuration
         val rotation = Homography.inverseRotation(rotationDegrees)
         // O recorte vale sobre a imagem **já girada**, como no caminho em CPU, que gira o bitmap
-        // antes de recortar. A 90° e 270° isso troca largura por altura: calcular o recorte sobre a
-        // captura crua daria um enquadramento completamente diferente do que a CPU produz.
-        val quarterTurn = rotationDegrees % 180 != 0
+        // antes de recortar. Um quarto de volta troca largura por altura, e usar as dimensões
+        // erradas estica a imagem para preencher o 16:9.
+        //
+        // O giro líquido não é só o pedido aqui: a SurfaceTexture pode entregar o quadro já girado,
+        // e nesse caso a matriz dela troca os eixos. Quando os dois giram, um desfaz o outro e o
+        // recorte volta a ser o da orientação original — daí o ou-exclusivo em vez do teste direto.
+        val quarterTurn = (rotationDegrees % 180 != 0) != streamSwapsAxes(courtMatrix)
         val cropWidth = if (quarterTurn) captureSize.height else captureSize.width
         val cropHeight = if (quarterTurn) captureSize.width else captureSize.height
         val crop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
@@ -180,6 +185,14 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             egl.swapBuffers(target.eglSurface)
         }
     }
+
+    /**
+     * Detecta se a matriz da SurfaceTexture troca os eixos, ou seja, se o produtor já entregou o
+     * quadro girado um quarto de volta. Numa matriz sem giro a diagonal domina; num giro de 90° ou
+     * 270° ela zera e quem manda são os termos cruzados.
+     */
+    private fun streamSwapsAxes(matrix: FloatArray): Boolean =
+        abs(matrix[0]) < 0.5f && abs(matrix[5]) < 0.5f && (abs(matrix[1]) > 0.5f || abs(matrix[4]) > 0.5f)
 
     private fun drawQuad(texture: Int, textureMatrix: FloatArray, map: FloatArray, left: Float, top: Float, right: Float, bottom: Float) {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)

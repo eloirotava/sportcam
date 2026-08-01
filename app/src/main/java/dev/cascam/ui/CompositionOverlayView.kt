@@ -9,6 +9,7 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import kotlin.math.abs
 import dev.cascam.config.DEFAULT_SCOREBOARD_CORNERS
 import dev.cascam.config.DEFAULT_SCOREBOARD_DESTINATION
 import dev.cascam.geometry.NormalizedPoint
@@ -26,6 +27,12 @@ class CompositionOverlayView @JvmOverloads constructor(
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 196, 77) }
     private val destinationPaint = strokePaint(Color.rgb(65, 170, 255))
     private val destinationHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(65, 170, 255) }
+    private val levelPaint = strokePaint(Color.rgb(255, 196, 77))
+    private val levelReferencePaint = strokePaint(Color.argb(140, 255, 255, 255))
+    private val levelTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
     private val strokePaints = listOf(cropPaint, quadPaint, destinationPaint)
     private val corners = DEFAULT_SCOREBOARD_CORNERS.toMutableList()
     private var destination = DEFAULT_SCOREBOARD_DESTINATION
@@ -46,6 +53,15 @@ class CompositionOverlayView @JvmOverloads constructor(
      * só serve quando o placar já está no centro. Quem hospeda a view traduz isso em deslocamento.
      */
     var onPanRequested: ((dx: Float, dy: Float) -> Unit)? = null
+
+    /** Inclinação do aparelho em graus, ou null quando não há sensor lendo. */
+    private var levelDegrees: Float? = null
+
+    fun setLevelDegrees(value: Float?) {
+        if (levelDegrees == value) return
+        levelDegrees = value
+        if (mode == Mode.COURT) invalidate()
+    }
 
     /**
      * Ampliação aplicada à view por quem a hospeda. As alças e os traços são divididos por ela para
@@ -90,7 +106,7 @@ class CompositionOverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width == 0 || height == 0) return
-        if (mode == Mode.COURT) drawCrop(canvas)
+        if (mode == Mode.COURT) { drawCrop(canvas); drawLevel(canvas) }
         if (mode == Mode.SCOREBOARD) drawScoreboard(canvas)
     }
 
@@ -108,6 +124,34 @@ class CompositionOverlayView @JvmOverloads constructor(
         canvas.drawRect(left, top, right, bottom, destinationPaint)
         canvas.drawCircle(left, top, handleRadius, destinationHandlePaint)
         canvas.drawCircle(right, bottom, handleRadius, destinationHandlePaint)
+    }
+
+    /**
+     * Nível de bolha: uma referência horizontal fixa e uma linha que acompanha a inclinação do
+     * aparelho. Fica verde dentro de meio grau, que é a tolerância em que uma quadra deixa de
+     * parecer torta no vídeo.
+     */
+    private fun drawLevel(canvas: Canvas) {
+        val degrees = levelDegrees ?: return
+        val centerX = width / 2f
+        val centerY = height / 2f
+        val arm = width * .16f
+        val aligned = abs(degrees) <= LEVEL_TOLERANCE
+        levelPaint.color = if (aligned) Color.rgb(115, 226, 167) else Color.rgb(255, 196, 77)
+        levelPaint.strokeWidth = STROKE_WIDTH / displayScale
+        levelTextPaint.color = levelPaint.color
+        levelTextPaint.textSize = 32f / displayScale
+
+        levelReferencePaint.strokeWidth = (STROKE_WIDTH / 2f) / displayScale
+        canvas.drawLine(centerX - arm, centerY, centerX - arm * .35f, centerY, levelReferencePaint)
+        canvas.drawLine(centerX + arm * .35f, centerY, centerX + arm, centerY, levelReferencePaint)
+
+        canvas.save()
+        canvas.rotate(-degrees, centerX, centerY)
+        canvas.drawLine(centerX - arm, centerY, centerX + arm, centerY, levelPaint)
+        canvas.restore()
+
+        canvas.drawText("%+.1f°".format(degrees), centerX, centerY - arm * .28f, levelTextPaint)
     }
 
     private fun cropRect() = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
@@ -324,5 +368,6 @@ class CompositionOverlayView @JvmOverloads constructor(
         const val STROKE_WIDTH = 4f
         const val HANDLE_RADIUS = 14f
         const val TOUCH_RADIUS = 56f
+        const val LEVEL_TOLERANCE = .5f
     }
 }

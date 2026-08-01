@@ -5,6 +5,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
@@ -56,6 +60,7 @@ import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
 import dev.cascam.stream.YoutubePublisher
 import java.io.IOException
+import kotlin.math.atan2
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -84,6 +89,7 @@ class MainActivity : AppCompatActivity() {
     private var dualCameraEngine: DualCameraEngine? = null
     private var compositor: GlCompositor? = null
     private var encoderSurface: Surface? = null
+    private var sensorManager: SensorManager? = null
     private var scoreboardPanX = 0f
     private var scoreboardPanY = 0f
     private val broadcastLifecycle = BroadcastLifecycleOwner()
@@ -222,6 +228,7 @@ class MainActivity : AppCompatActivity() {
         if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
         if (target != Screen.BROADCAST) { dualCameraEngine?.stop(); releaseCompositor() }
         if (target != Screen.DIAGNOSTICS) stopProbe()
+        if (target == Screen.COURT) startLevelSensor() else stopLevelSensor()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
         binding.panelCourt.visibility = if (target == Screen.COURT) View.VISIBLE else View.GONE
@@ -690,7 +697,7 @@ class MainActivity : AppCompatActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             runCatching { future.get().unbindAll() }
-            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, compositionRotation(engine, plan))
+            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, compositionRotation(engine, plan, gpu = false))
         }, ContextCompat.getMainExecutor(this))
         return true
     }
@@ -704,7 +711,7 @@ class MainActivity : AppCompatActivity() {
         val created = GlCompositor { status -> runOnUiThread { binding.broadcastStatus.text = status } }
         compositor = created
         created.configure(readForm())
-        created.start(plan.size, compositionRotation(engine, plan)) {
+        created.start(plan.size, compositionRotation(engine, plan, gpu = true)) {
             runOnUiThread {
                 val courtSurface = created.courtSurface
                 val scoreboardSurface = created.scoreboardSurface
@@ -713,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 attachGpuPreview(created)
-                engine.start(plan, compositionRotation(engine, plan), courtSurface to scoreboardSurface)
+                engine.start(plan, compositionRotation(engine, plan, gpu = true), courtSurface to scoreboardSurface)
             }
         }
     }
@@ -741,10 +748,16 @@ class MainActivity : AppCompatActivity() {
         compositor = null
     }
 
-    /** Escolha do usuário quando existe; senão a conta automática a partir da orientação do sensor. */
-    private fun compositionRotation(engine: DualCameraEngine, plan: DualCameraEngine.Plan): Int =
-        FrameRotation.entries[binding.frameRotation.selectedItemPosition].degrees
-            ?: engine.rotationFor(plan.logicalId, displayRotationDegrees())
+    /**
+     * A conta automática acerta o caminho em CPU, que recebe o buffer cru do ImageReader. O caminho
+     * em GPU recebe o quadro por SurfaceTexture, e o produtor pode entregá-lo já girado — por isso
+     * só ele aceita a correção manual, e o CPU segue sempre no automático.
+     */
+    private fun compositionRotation(engine: DualCameraEngine, plan: DualCameraEngine.Plan, gpu: Boolean): Int {
+        val automatic = engine.rotationFor(plan.logicalId, displayRotationDegrees())
+        if (!gpu) return automatic
+        return FrameRotation.entries[binding.frameRotation.selectedItemPosition].degrees ?: automatic
+    }
 
     private fun displayRotationDegrees() = when (display?.rotation) {
         Surface.ROTATION_90 -> 90
@@ -793,7 +806,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Nível a partir do vetor gravidade. Com a tela travada em paisagem, estar nivelado quer dizer
+     * estar a noventa graus da orientação natural do aparelho, então o desvio é medido contra o
+     * múltiplo de noventa mais próximo — assim vale para os dois lados em que dá para deitar o
+     * celular no tripé.
+     */
+    private val levelListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (screen != Screen.COURT) return
+            val angle = Math.toDegrees(atan2(event.values[0].toDouble(), event.values[1].toDouble())).toFloat()
+            val deviation = if (angle >= 0f) angle - 90f else angle + 90f
+            binding.compositionOverlay.setLevelDegrees(deviation)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
+    private fun startLevelSensor() {
+        val manager = sensorManager ?: getSystemService(SensorManager::class.java)?.also { sensorManager = it } ?: return
+        val sensor = manager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            ?: return
+        manager.registerListener(levelListener, sensor, SensorManager.SENSOR_DELAY_UI)
+    }
+
+    private fun stopLevelSensor() {
+        sensorManager?.unregisterListener(levelListener)
+        binding.compositionOverlay.setLevelDegrees(null)
+    }
+
+    override fun onPause() {
+        stopLevelSensor()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (screen == Screen.COURT) startLevelSensor()
+    }
+
     override fun onDestroy() {
+        stopLevelSensor()
         probe?.shutdown()
         probe = null
         dualCameraEngine?.release()
