@@ -445,7 +445,7 @@ class DualCameraProbe(
                             appendLine("  A QUADRA ficou sem pedido de zoom durante o teste.")
                         }
                         zoom?.supported == true -> appendLine("  O HAL aceitou/declarou zoom independente, mas a mudança visual não foi confirmada; repita com o celular e a cena parados.")
-                        else -> appendLine("  Zoom independente de PLACAR/CRONÔMETRO não foi confirmado neste par.")
+                        else -> appendLine("  Zoom independente de PLACAR/CRONÔMETRO não foi confirmado neste par; isso não prova que o sensor não tenha zoom comum.")
                     }
                     appendLine()
                     appendLine("  ONDE APONTAR O TRIPÉ")

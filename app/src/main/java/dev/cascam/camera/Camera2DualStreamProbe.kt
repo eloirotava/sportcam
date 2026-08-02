@@ -237,7 +237,13 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
             val logical = manager.getCameraCharacteristics(logicalId)
             val keys = runCatching { logical.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
             val physical = manager.getCameraCharacteristics(physicalB)
-            val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            // A sobrecarga simples cria o request sem blocos de configuração física. Nesse caso
+            // setPhysicalCameraKey() rejeita até IDs presentes em physicalCameraIds com
+            // "Physical camera id is not valid". Os IDs precisam entrar já na criação do builder.
+            val builder = camera.createCaptureRequest(
+                CameraDevice.TEMPLATE_PREVIEW,
+                setOf(physicalA, physicalB),
+            ).apply {
                 addTarget(readerA.surface)
                 addTarget(readerB.surface)
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
