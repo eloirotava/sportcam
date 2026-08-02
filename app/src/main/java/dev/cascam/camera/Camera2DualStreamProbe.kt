@@ -249,15 +249,6 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             }
             val zoom = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && keys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
-                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    val factor = range?.upper
-                    if (factor == null || factor <= 1f) null else {
-                        builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, factor, physicalB)
-                        PhysicalZoomResult(true, false, factor, PerPhysicalZoom.ZOOM_RATIO, "requisição preparada")
-                    }
-                }
                 keys.contains(CaptureRequest.SCALER_CROP_REGION) -> {
                     val active = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                     val factor = physical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
@@ -265,6 +256,15 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
                     if (active == null || factor == null || factor <= 1f) null else {
                         builder.setPhysicalCameraKey(CaptureRequest.SCALER_CROP_REGION, centeredCrop(active, factor), physicalB)
                         PhysicalZoomResult(true, false, factor, PerPhysicalZoom.CROP_REGION, "requisição preparada")
+                    }
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && keys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
+                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    val factor = range?.upper
+                    if (factor == null || factor <= 1f) null else {
+                        builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, factor, physicalB)
+                        PhysicalZoomResult(true, false, factor, PerPhysicalZoom.ZOOM_RATIO, "requisição preparada")
                     }
                 }
                 else -> null

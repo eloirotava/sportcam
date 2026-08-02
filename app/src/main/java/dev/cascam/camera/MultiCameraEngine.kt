@@ -158,12 +158,10 @@ class MultiCameraEngine(
             }
             val physical = manager.getCameraCharacteristics(physicalId)
             when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && physicalKeys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
-                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    val value = source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom)
-                    builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, value, physicalId)
-                }
+                // O S22 anuncia CONTROL_ZOOM_RATIO por sensor e aceita o request, mas ignora a
+                // mudança em alguns sensores físicos durante multistream. SCALER_CROP_REGION é
+                // igualmente anunciado e descreve diretamente a área do sensor que deve gerar o
+                // buffer 1080p, portanto é a via determinística para a composição.
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalKeys.contains(CaptureRequest.SCALER_CROP_REGION) -> {
                     val active = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@forEach
                     val maximum = physical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: source.zoom
@@ -172,6 +170,12 @@ class MultiCameraEngine(
                         centeredCrop(active, source.zoom.coerceAtMost(maximum)),
                         physicalId,
                     )
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && physicalKeys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
+                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    val value = source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom)
+                    builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, value, physicalId)
                 }
                 else -> onStatus("Zoom independente indisponível para ${source.id}; mantendo 1,0×")
             }
