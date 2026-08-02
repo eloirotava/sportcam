@@ -2,6 +2,7 @@ package dev.cascam.geometry
 
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.CaptureProfile
+import dev.cascam.config.CaptureSettings
 import dev.cascam.config.OverlayLayer
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraInfo
@@ -96,6 +97,26 @@ class CompositionGeometryTest {
 
     @Test fun `capture profile has a readable label`() {
         assertEquals("1920×1080 · 30 fps", CaptureProfile(1920, 1080, 30).label)
+    }
+
+    @Test fun `shared camera resolves the most demanding layer profile`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "wide",
+            captureWidth = 1280,
+            captureHeight = 720,
+            captureFps = 20,
+            scoreboardCameraId = "wide",
+            scoreboardCaptureWidth = 1920,
+            scoreboardCaptureHeight = 1080,
+            scoreboardCaptureFps = 10,
+            clockCameraId = "wide",
+            clockEnabled = true,
+            clockCaptureWidth = 640,
+            clockCaptureHeight = 360,
+            clockCaptureFps = 30,
+        )
+
+        assertEquals(CaptureSettings(1920, 1080, 30), configuration.resolvedCaptureSettings("wide"))
     }
 
     @Test fun `simultaneous support follows logical camera groups`() {

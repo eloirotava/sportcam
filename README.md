@@ -24,7 +24,8 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - seleção independente da câmera da quadra, do placar e do cronômetro, incluindo lentes traseiras,
   frontais e externas anunciadas pelo Android;
 - compartilhamento de um único stream quando duas ou três camadas escolhem a mesma câmera;
-- seleção de resolução e FPS limitada à interseção anunciada pelas fontes habilitadas;
+- seleção de resolução e FPS por fonte; camadas que compartilham câmera usam o perfil
+  mais exigente entre elas;
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
   servidor/chave do YouTube, persistidos localmente;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
@@ -40,6 +41,9 @@ de captura selecionado (20 fps no automático), captura o microfone em AAC mono 
 simultâneo, a tela Ao vivo abre as fontes distintas selecionadas; camadas que apontam
 para a mesma câmera compartilham o stream. CPU e GPU fazem o recorte da quadra e
 aplicam a homografia dos quatro pontos de cada sobreposição, sem transmitir os guias.
+Enquanto a tela está ligada, o preview continua disponível durante a transmissão. Ao
+apagar a tela ou mandar o app ao fundo, somente o destino visual do compositor é
+suspenso; câmera, composição do encoder, áudio e upload continuam ativos.
 
 Os seletores distinguem câmeras **lógicas** e sensores **físicos** anunciados dentro
 delas. Isso evita que ultra-wide e principal acabem resolvendo para a mesma câmera

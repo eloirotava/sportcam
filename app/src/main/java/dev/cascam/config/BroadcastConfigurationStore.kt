@@ -23,6 +23,12 @@ class BroadcastConfigurationStore(context: Context) {
         captureWidth = preferences.getInt("capture_width", 0).coerceAtLeast(0),
         captureHeight = preferences.getInt("capture_height", 0).coerceAtLeast(0),
         captureFps = preferences.getInt("capture_fps", 0).coerceAtLeast(0),
+        scoreboardCaptureWidth = preferences.getInt("scoreboard_capture_width", 0).coerceAtLeast(0),
+        scoreboardCaptureHeight = preferences.getInt("scoreboard_capture_height", 0).coerceAtLeast(0),
+        scoreboardCaptureFps = preferences.getInt("scoreboard_capture_fps", 0).coerceAtLeast(0),
+        clockCaptureWidth = preferences.getInt("clock_capture_width", 0).coerceAtLeast(0),
+        clockCaptureHeight = preferences.getInt("clock_capture_height", 0).coerceAtLeast(0),
+        clockCaptureFps = preferences.getInt("clock_capture_fps", 0).coerceAtLeast(0),
         protocol = runCatching {
             BroadcastProtocol.valueOf(preferences.getString("broadcast_protocol", null).orEmpty())
         }.getOrDefault(BroadcastProtocol.RTMPS),
@@ -69,6 +75,12 @@ class BroadcastConfigurationStore(context: Context) {
             .putInt("capture_width", configuration.captureWidth)
             .putInt("capture_height", configuration.captureHeight)
             .putInt("capture_fps", configuration.captureFps)
+            .putInt("scoreboard_capture_width", configuration.scoreboardCaptureWidth)
+            .putInt("scoreboard_capture_height", configuration.scoreboardCaptureHeight)
+            .putInt("scoreboard_capture_fps", configuration.scoreboardCaptureFps)
+            .putInt("clock_capture_width", configuration.clockCaptureWidth)
+            .putInt("clock_capture_height", configuration.clockCaptureHeight)
+            .putInt("clock_capture_fps", configuration.clockCaptureFps)
             .putString("broadcast_protocol", configuration.protocol.name)
             .putString("video_codec", configuration.videoCodec.name)
             .putString("bitrate_preset", configuration.bitratePreset.name)

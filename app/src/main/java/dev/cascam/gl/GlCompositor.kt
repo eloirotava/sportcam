@@ -67,6 +67,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     @Volatile private var sourceIds: List<String> = emptyList()
     @Volatile private var sourceRotations: Map<String, Int> = emptyMap()
     @Volatile private var ready = false
+    @Volatile private var previewEnabled = true
 
     var courtSurface: Surface? = null
         private set
@@ -77,8 +78,13 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
 
     val isReady: Boolean get() = ready
 
-    fun start(size: Size, rotation: Int, onReady: () -> Unit) {
-        captureSize = size
+    fun start(size: Size, rotation: Int, onReady: () -> Unit) = start(listOf(size, size, size), rotation, onReady)
+
+    fun start(sourceSizes: List<Size>, rotation: Int, onReady: () -> Unit) {
+        val courtSize = sourceSizes.getOrElse(0) { Size(1920, 1080) }
+        val scoreboardSize = sourceSizes.getOrElse(1) { courtSize }
+        val clockSize = sourceSizes.getOrElse(2) { scoreboardSize }
+        captureSize = courtSize
         rotationDegrees = rotation
         handler.post {
             runCatching {
@@ -89,15 +95,15 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 scoreboardTexture = createExternalTexture()
                 clockTexture = createExternalTexture()
                 courtStream = SurfaceTexture(courtTexture).apply {
-                    setDefaultBufferSize(size.width, size.height)
+                    setDefaultBufferSize(courtSize.width, courtSize.height)
                     setOnFrameAvailableListener({ courtPending = true; handler.post(::render) }, handler)
                 }
                 scoreboardStream = SurfaceTexture(scoreboardTexture).apply {
-                    setDefaultBufferSize(size.width, size.height)
+                    setDefaultBufferSize(scoreboardSize.width, scoreboardSize.height)
                     setOnFrameAvailableListener({ scoreboardPending = true }, handler)
                 }
                 clockStream = SurfaceTexture(clockTexture).apply {
-                    setDefaultBufferSize(size.width, size.height)
+                    setDefaultBufferSize(clockSize.width, clockSize.height)
                     setOnFrameAvailableListener({ clockPending = true }, handler)
                 }
                 courtSurface = Surface(courtStream)
@@ -116,6 +122,9 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     fun configureSourceIds(ids: List<String>, rotations: Map<String, Int> = emptyMap()) {
         sourceIds = ids; sourceRotations = rotations
     }
+
+    /** O encoder continua desenhando; só o destino sem PTS, usado pela tela, é suspenso. */
+    fun setPreviewEnabled(enabled: Boolean) { previewEnabled = enabled }
 
     fun addTarget(
         surface: Surface,
@@ -207,6 +216,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val clockDestination = config.clockDestination
 
         targets.toList().forEach { target ->
+            if (target.presentationOriginNanos == null && !previewEnabled) return@forEach
             runCatching {
                 egl.makeCurrent(target.eglSurface)
                 GLES20.glViewport(0, 0, target.width, target.height)

@@ -28,8 +28,14 @@ class MultiCameraEngine(
     private val onFrame: (cameraId: String, Bitmap) -> Unit,
     private val onStatus: (String) -> Unit,
 ) {
-    data class Source(val id: String, val logicalId: String, val physicalId: String?)
-    data class Plan(val sources: List<Source>, val size: Size, val fps: Int)
+    data class Source(
+        val id: String,
+        val logicalId: String,
+        val physicalId: String?,
+        val size: Size,
+        val fps: Int,
+    )
+    data class Plan(val sources: List<Source>)
 
     private val thread = HandlerThread("cascam-multi-camera").also { it.start() }
     private val handler = Handler(thread.looper)
@@ -50,13 +56,13 @@ class MultiCameraEngine(
         running = true
         handler.post {
             surfaces = gpuSurfaces ?: plan.sources.associate { source ->
-                val reader = ImageReader.newInstance(plan.size.width, plan.size.height, ImageFormat.YUV_420_888, 3)
+                val reader = ImageReader.newInstance(source.size.width, source.size.height, ImageFormat.YUV_420_888, 3)
                 readers[source.id] = reader
                 reader.setOnImageAvailableListener({ available ->
                     val image = available.acquireLatestImage() ?: return@setOnImageAvailableListener
                     try {
                         if (running) runCatching {
-                            onFrame(source.id, YuvFrameConverter.convert(image, plan.size.width, rotations[source.id] ?: 0))
+                            onFrame(source.id, YuvFrameConverter.convert(image, source.size.width, rotations[source.id] ?: 0))
                         }.onFailure { onStatus("Falha ao converter ${source.id}: ${it.message}") }
                     } finally { image.close() }
                 }, handler)
@@ -103,11 +109,13 @@ class MultiCameraEngine(
                         sources.forEach { addTarget(surfaces.getValue(it.id)) }
                         set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                         set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-                        fpsRange(camera.id, plan.fps)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                        val requestedFps = sources.maxOfOrNull { it.fps } ?: 0
+                        fpsRange(camera.id, requestedFps)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
                     }.build()
                     session.setRepeatingRequest(request, null, handler)
                     if (sessions.size == plan.sources.map { it.logicalId }.distinct().size) {
-                        onStatus("${plan.sources.size} fonte(s) Camera2 ativas em ${plan.size.width}×${plan.size.height}")
+                        val profiles = plan.sources.joinToString { "${it.id}=${it.size.width}×${it.size.height}@${it.fps.takeIf { fps -> fps > 0 } ?: "auto"}" }
+                        onStatus("${plan.sources.size} fonte(s) Camera2 ativas · $profiles")
                     }
                 }.onFailure { fail("não consegui iniciar ${camera.id}: ${it.message}") }
             }

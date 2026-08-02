@@ -106,8 +106,12 @@ class YoutubePublisher(
                     }
                     bitmap.recycle()
                 }
+                // Surface input não tem buffer para enfileirar aqui. Esperar pelo encoder evita o
+                // polling de 5 ms (até 200 wakeups/s) sem acrescentar latência ao PTS dos quadros.
+                var outputWaitUs = if (useSurfaceInput) 50_000L else 0L
                 while (true) {
-                    val index = codec.dequeueOutputBuffer(info, 0)
+                    val index = codec.dequeueOutputBuffer(info, outputWaitUs)
+                    outputWaitUs = 0
                     if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val output = codec.outputFormat
                         val units = listOfNotNull(output.getByteBuffer("csd-0"), output.getByteBuffer("csd-1"))
@@ -135,7 +139,7 @@ class YoutubePublisher(
                         codec.releaseOutputBuffer(index, false)
                     } else break
                 }
-                if (useSurfaceInput || frames.isEmpty()) Thread.sleep(5)
+                if (!useSurfaceInput && frames.isEmpty()) Thread.sleep(5)
             }
         } catch (error: Exception) {
             if (running.getAndSet(false)) onStatus("Falha na transmissão: ${error.message ?: error.javaClass.simpleName}")

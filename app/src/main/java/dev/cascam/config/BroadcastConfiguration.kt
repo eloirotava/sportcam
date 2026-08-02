@@ -20,6 +20,12 @@ data class BroadcastConfiguration(
     val captureWidth: Int = 0,
     val captureHeight: Int = 0,
     val captureFps: Int = 0,
+    val scoreboardCaptureWidth: Int = 0,
+    val scoreboardCaptureHeight: Int = 0,
+    val scoreboardCaptureFps: Int = 0,
+    val clockCaptureWidth: Int = 0,
+    val clockCaptureHeight: Int = 0,
+    val clockCaptureFps: Int = 0,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val videoCodec: VideoCodec = VideoCodec.H264,
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
@@ -49,6 +55,27 @@ data class BroadcastConfiguration(
         get() = if (captureWidth > 0 && captureHeight > 0 && captureFps > 0) {
             CaptureProfile(captureWidth, captureHeight, captureFps)
         } else null
+
+    fun captureSettingsFor(layer: OverlayLayer?): CaptureSettings = when (layer) {
+        null -> CaptureSettings(captureWidth, captureHeight, captureFps)
+        OverlayLayer.SCOREBOARD -> CaptureSettings(scoreboardCaptureWidth, scoreboardCaptureHeight, scoreboardCaptureFps)
+        OverlayLayer.CLOCK -> CaptureSettings(clockCaptureWidth, clockCaptureHeight, clockCaptureFps)
+    }
+
+    /** Quando camadas compartilham a câmera, um único stream atende a configuração mais exigente. */
+    fun resolvedCaptureSettings(cameraId: String): CaptureSettings {
+        val requested = buildList {
+            if (courtCameraId == cameraId) add(captureSettingsFor(null))
+            if (scoreboardEnabled && cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId) add(captureSettingsFor(OverlayLayer.SCOREBOARD))
+            if (clockEnabled && cameraIdFor(OverlayLayer.CLOCK) == cameraId) add(captureSettingsFor(OverlayLayer.CLOCK))
+        }
+        val largest = requested.filter { it.hasSize }.maxByOrNull { it.width.toLong() * it.height }
+        return CaptureSettings(largest?.width ?: 0, largest?.height ?: 0, requested.maxOfOrNull { it.fps } ?: 0)
+    }
+}
+
+data class CaptureSettings(val width: Int = 0, val height: Int = 0, val fps: Int = 0) {
+    val hasSize: Boolean get() = width > 0 && height > 0
 }
 
 data class CaptureProfile(val width: Int, val height: Int, val fps: Int) {

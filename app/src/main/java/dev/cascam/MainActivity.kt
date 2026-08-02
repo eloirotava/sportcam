@@ -32,7 +32,6 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
-import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -78,6 +77,11 @@ class MainActivity : AppCompatActivity() {
     private var cameraIds: List<String> = emptyList()
     private var captureSizeOptions: List<Pair<String, Pair<Int, Int>>> = listOf("Automática" to (0 to 0))
     private var captureFpsOptions: List<Int> = listOf(0)
+    private var scoreboardCaptureSizeOptions: List<Pair<String, Pair<Int, Int>>> = listOf("Automática" to (0 to 0))
+    private var scoreboardCaptureFpsOptions: List<Int> = listOf(0)
+    private var clockCaptureSizeOptions: List<Pair<String, Pair<Int, Int>>> = listOf("Automática" to (0 to 0))
+    private var clockCaptureFpsOptions: List<Int> = listOf(0)
+    private var updatingCaptureOptions = false
     private var screen = Screen.BROADCAST
     private var boundCamera: Camera? = null
     private val courtAnalysisExecutor = Executors.newSingleThreadExecutor()
@@ -139,7 +143,9 @@ class MainActivity : AppCompatActivity() {
         binding.scoreboardEnabled.isChecked = configuration.scoreboardEnabled
         binding.clockEnabled.isChecked = configuration.clockEnabled
         binding.courtOverlay.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, OverlayLayer.entries.map { it.label })
-        updateCaptureOptions(configuration.requiredCameraIds(), configuration.captureWidth to configuration.captureHeight, configuration.captureFps)
+        updateCaptureOptions(configuration.courtCameraId, null, configuration.captureWidth to configuration.captureHeight, configuration.captureFps)
+        updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.SCOREBOARD), OverlayLayer.SCOREBOARD, configuration.scoreboardCaptureWidth to configuration.scoreboardCaptureHeight, configuration.scoreboardCaptureFps)
+        updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.CLOCK), OverlayLayer.CLOCK, configuration.clockCaptureWidth to configuration.clockCaptureHeight, configuration.clockCaptureFps)
         binding.broadcastProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BroadcastProtocol.entries.map { it.label })
         binding.broadcastProtocol.setSelection(BroadcastProtocol.entries.indexOf(configuration.protocol))
         binding.videoCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, VideoCodec.entries.map { it.label })
@@ -226,7 +232,7 @@ class MainActivity : AppCompatActivity() {
         }
         val enabledChanged = View.OnClickListener {
             binding.compositionOverlay.setEnabledOverlays(binding.scoreboardEnabled.isChecked, binding.clockEnabled.isChecked)
-            updateCaptureOptions(readForm().requiredCameraIds())
+            updateAllCaptureOptions()
             applyCompositionConfiguration()
         }
         binding.scoreboardEnabled.setOnClickListener(enabledChanged)
@@ -244,7 +250,7 @@ class MainActivity : AppCompatActivity() {
         })
         val cameraListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateCaptureOptions(readForm().requiredCameraIds())
+                updateAllCaptureOptions()
                 if (screen != Screen.BROADCAST) startCamera(cameraIdFor(screen))
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -254,12 +260,16 @@ class MainActivity : AppCompatActivity() {
         binding.clockCamera.onItemSelectedListener = cameraListener
         val captureListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (screen == Screen.BROADCAST && publisher == null) showScreen(Screen.BROADCAST)
+                if (!updatingCaptureOptions && screen == Screen.BROADCAST && publisher == null) showScreen(Screen.BROADCAST)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         binding.captureResolution.onItemSelectedListener = captureListener
         binding.captureFps.onItemSelectedListener = captureListener
+        binding.scoreboardCaptureResolution.onItemSelectedListener = captureListener
+        binding.scoreboardCaptureFps.onItemSelectedListener = captureListener
+        binding.clockCaptureResolution.onItemSelectedListener = captureListener
+        binding.clockCaptureFps.onItemSelectedListener = captureListener
         binding.broadcastProtocol.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val protocol = BroadcastProtocol.entries[position]
@@ -323,25 +333,47 @@ class MainActivity : AppCompatActivity() {
         Screen.DIAGNOSTICS -> null
     }
 
+    private fun updateAllCaptureOptions() {
+        val configuration = readForm()
+        updatingCaptureOptions = true
+        try {
+            updateCaptureOptions(configuration.courtCameraId, null)
+            updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.SCOREBOARD), OverlayLayer.SCOREBOARD)
+            updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.CLOCK), OverlayLayer.CLOCK)
+        } finally {
+            updatingCaptureOptions = false
+        }
+    }
+
     private fun updateCaptureOptions(
-        requestedIds: Set<String>,
-        selectedSize: Pair<Int, Int> = captureSizeOptions.getOrNull(binding.captureResolution.selectedItemPosition)?.second ?: (0 to 0),
-        selectedFps: Int = captureFpsOptions.getOrElse(binding.captureFps.selectedItemPosition) { 0 },
+        cameraId: String,
+        layer: OverlayLayer?,
+        selectedSize: Pair<Int, Int>? = null,
+        selectedFps: Int? = null,
     ) {
-        val selected = requestedIds.mapNotNull(capabilities::camera)
-        val commonSizes = selected.map { it.yuvSizes.toSet() }.reduceOrNull { common, sizes -> common intersect sizes }.orEmpty()
-            .sortedByDescending { it.width.toLong() * it.height }
-        captureSizeOptions = listOf("Automática" to (0 to 0)) + commonSizes.map {
+        val camera = capabilities.camera(cameraId)
+        val sizes = listOf("Automática" to (0 to 0)) + camera?.yuvSizes.orEmpty().map {
             "${it.width}×${it.height}" to (it.width to it.height)
         }
-        val candidates = selected.flatMap { camera -> camera.fpsRanges.map { it.upper } }.distinct().sorted()
-        captureFpsOptions = listOf(0) + candidates.filter { fps ->
-            selected.isNotEmpty() && selected.all { camera -> camera.fpsRanges.any { it.upper == fps } }
+        val fpsValues = listOf(0) + camera?.fpsRanges.orEmpty().map { it.upper }.distinct().sorted()
+        val (resolutionSpinner, fpsSpinner) = when (layer) {
+            null -> binding.captureResolution to binding.captureFps
+            OverlayLayer.SCOREBOARD -> binding.scoreboardCaptureResolution to binding.scoreboardCaptureFps
+            OverlayLayer.CLOCK -> binding.clockCaptureResolution to binding.clockCaptureFps
         }
-        binding.captureResolution.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, captureSizeOptions.map { it.first })
-        binding.captureResolution.setSelection(captureSizeOptions.indexOfFirst { it.second == selectedSize }.coerceAtLeast(0))
-        binding.captureFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, captureFpsOptions.map { if (it == 0) "Automático" else "$it fps" })
-        binding.captureFps.setSelection(captureFpsOptions.indexOf(selectedFps).coerceAtLeast(0))
+        val oldSizes = when (layer) { null -> captureSizeOptions; OverlayLayer.SCOREBOARD -> scoreboardCaptureSizeOptions; OverlayLayer.CLOCK -> clockCaptureSizeOptions }
+        val oldFps = when (layer) { null -> captureFpsOptions; OverlayLayer.SCOREBOARD -> scoreboardCaptureFpsOptions; OverlayLayer.CLOCK -> clockCaptureFpsOptions }
+        val preservedSize = selectedSize ?: oldSizes.getOrNull(resolutionSpinner.selectedItemPosition)?.second ?: (0 to 0)
+        val preservedFps = selectedFps ?: oldFps.getOrElse(fpsSpinner.selectedItemPosition) { 0 }
+        when (layer) {
+            null -> { captureSizeOptions = sizes; captureFpsOptions = fpsValues }
+            OverlayLayer.SCOREBOARD -> { scoreboardCaptureSizeOptions = sizes; scoreboardCaptureFpsOptions = fpsValues }
+            OverlayLayer.CLOCK -> { clockCaptureSizeOptions = sizes; clockCaptureFpsOptions = fpsValues }
+        }
+        resolutionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sizes.map { it.first })
+        resolutionSpinner.setSelection(sizes.indexOfFirst { it.second == preservedSize }.coerceAtLeast(0))
+        fpsSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsValues.map { if (it == 0) "Automático" else "$it fps" })
+        fpsSpinner.setSelection(fpsValues.indexOf(preservedFps).coerceAtLeast(0))
     }
 
     private fun automaticCaptureSize(ids: Set<String>): android.util.Size {
@@ -353,9 +385,17 @@ class MainActivity : AppCompatActivity() {
             ?: CameraXSupport.DEFAULT_ANALYSIS_SIZE
     }
 
+    private fun captureSizeFor(configuration: BroadcastConfiguration, cameraId: String): android.util.Size {
+        val settings = configuration.resolvedCaptureSettings(cameraId)
+        return if (settings.hasSize) android.util.Size(settings.width, settings.height)
+        else automaticCaptureSize(setOf(cameraId))
+    }
+
     private fun readForm(): BroadcastConfiguration {
         val (cropZoom, cropPanX, cropPanY) = binding.compositionOverlay.crop()
         val captureSize = captureSizeOptions.getOrNull(binding.captureResolution.selectedItemPosition)?.second ?: (0 to 0)
+        val scoreboardCaptureSize = scoreboardCaptureSizeOptions.getOrNull(binding.scoreboardCaptureResolution.selectedItemPosition)?.second ?: (0 to 0)
+        val clockCaptureSize = clockCaptureSizeOptions.getOrNull(binding.clockCaptureResolution.selectedItemPosition)?.second ?: (0 to 0)
         return BroadcastConfiguration(
             courtCameraId = cameraIds.getOrNull(binding.courtCamera.selectedItemPosition).orEmpty(),
             scoreboardCameraId = cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition).orEmpty(),
@@ -370,6 +410,12 @@ class MainActivity : AppCompatActivity() {
             captureWidth = captureSize.first,
             captureHeight = captureSize.second,
             captureFps = captureFpsOptions.getOrElse(binding.captureFps.selectedItemPosition) { 0 },
+            scoreboardCaptureWidth = scoreboardCaptureSize.first,
+            scoreboardCaptureHeight = scoreboardCaptureSize.second,
+            scoreboardCaptureFps = scoreboardCaptureFpsOptions.getOrElse(binding.scoreboardCaptureFps.selectedItemPosition) { 0 },
+            clockCaptureWidth = clockCaptureSize.first,
+            clockCaptureHeight = clockCaptureSize.second,
+            clockCaptureFps = clockCaptureFpsOptions.getOrElse(binding.clockCaptureFps.selectedItemPosition) { 0 },
             protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             videoCodec = VideoCodec.entries[binding.videoCodec.selectedItemPosition],
             bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
@@ -632,11 +678,12 @@ class MainActivity : AppCompatActivity() {
             !capabilities.supportsSimultaneous(configuration.requiredCameraIds()) -> null.also {
                 toast("O aparelho não anunciou captura simultânea para as câmeras escolhidas")
             }
-            configuration.captureWidth > 0 && selectedCameras.any { camera ->
-                camera.yuvSizes.none { it.width == configuration.captureWidth && it.height == configuration.captureHeight }
-            } -> null.also { toast("A resolução escolhida não é comum a todas as câmeras") }
-            configuration.captureFps > 0 && selectedCameras.any { camera -> camera.fpsRanges.none { it.upper == configuration.captureFps } } ->
-                null.also { toast("O FPS escolhido não é comum a todas as câmeras") }
+            selectedCameras.any { camera -> configuration.resolvedCaptureSettings(camera.id).let { requested ->
+                requested.hasSize && camera.yuvSizes.none { it.width == requested.width && it.height == requested.height }
+            } } -> null.also { toast("Uma fonte não suporta a resolução escolhida") }
+            selectedCameras.any { camera -> configuration.resolvedCaptureSettings(camera.id).let { requested ->
+                requested.fps > 0 && camera.fpsRanges.none { it.upper == requested.fps }
+            } } -> null.also { toast("Uma fonte não suporta o FPS escolhido") }
             configuration.protocol == BroadcastProtocol.RTMPS && !configuration.youtubeServerUrl.startsWith("rtmps://") -> null.also { binding.youtubeServer.error = "Use uma URL RTMPS" }
             configuration.protocol == BroadcastProtocol.HLS && !configuration.youtubeServerUrl.startsWith("https://") -> null.also { binding.youtubeServer.error = "Use a URL HTTPS de ingestão HLS do YouTube Studio" }
             configuration.protocol == BroadcastProtocol.RTMPS && configuration.videoCodec != VideoCodec.H264 -> null.also { toast("RTMPS usa H.264; selecione HLS para H.265") }
@@ -717,6 +764,8 @@ class MainActivity : AppCompatActivity() {
             binding.courtCamera, binding.scoreboardCamera, binding.clockCamera,
             binding.scoreboardEnabled, binding.clockEnabled,
             binding.captureResolution, binding.captureFps, binding.compositionEngine, binding.frameRotation,
+            binding.scoreboardCaptureResolution, binding.scoreboardCaptureFps,
+            binding.clockCaptureResolution, binding.clockCaptureFps,
         ).forEach { it.isEnabled = enabled }
     }
 
@@ -770,6 +819,11 @@ class MainActivity : AppCompatActivity() {
         val requiredIds = configuration.requiredCameraIds()
         val auxiliaryKey = requiredIds.firstOrNull { it != courtKey }
         val auxiliaryInfo = auxiliaryKey?.let(::cameraFor)
+        val hasDifferentSourceProfiles = requiredIds.map(configuration::resolvedCaptureSettings).distinct().size > 1
+        if (configuration.compositionEngine == CompositionEngine.GPU || hasDifferentSourceProfiles) {
+            startMultiCameraComposition(configuration)
+            return
+        }
         if (requiredIds.size > 2) {
             startMultiCameraComposition(configuration)
             return
@@ -778,10 +832,6 @@ class MainActivity : AppCompatActivity() {
             auxiliaryCameraId = auxiliaryKey
             if (startDualSensorCapture(courtInfo, auxiliaryInfo)) return
         }
-        if (configuration.compositionEngine == CompositionEngine.GPU) {
-            startGpuCameraXComposition(configuration)
-            return
-        }
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
@@ -789,7 +839,7 @@ class MainActivity : AppCompatActivity() {
             val sourceDescription = configuration.requiredCameraIds().joinToString { it }
             val analyses = configuration.requiredCameraIds().mapNotNull { key ->
                 val camera = cameraFor(key) ?: return@mapNotNull null
-                key to imageAnalysis(camera).also { analysis ->
+                key to imageAnalysis(camera, key).also { analysis ->
                     val executor = when (key) {
                         courtKey -> courtAnalysisExecutor
                         scoreboardKey -> scoreboardAnalysisExecutor
@@ -854,18 +904,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun startMultiCameraComposition(configuration: BroadcastConfiguration) {
         val ids = configuration.requiredCameraIds().toList()
-        val sources = ids.mapNotNull { id -> cameraFor(id)?.let { MultiCameraEngine.Source(id, it.logicalCameraId, it.physicalCameraId) } }
+        val sources = ids.mapNotNull { id -> cameraFor(id)?.let { camera ->
+            val settings = configuration.resolvedCaptureSettings(id)
+            MultiCameraEngine.Source(id, camera.logicalCameraId, camera.physicalCameraId, captureSizeFor(configuration, id), settings.fps)
+        } }
         if (sources.size != ids.size) return
-        val size = if (configuration.captureWidth > 0 && configuration.captureHeight > 0) {
-            android.util.Size(configuration.captureWidth, configuration.captureHeight)
-        } else automaticCaptureSize(configuration.requiredCameraIds())
         val rotations = sources.associate { it.id to rotationFor(it.logicalId) }
         val engine = multiCameraEngine ?: MultiCameraEngine(
             getSystemService(CameraManager::class.java),
             onFrame = { id, bitmap -> submitSourceFrame(id, bitmap, compositionConfiguration) },
             onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
         ).also { multiCameraEngine = it }
-        val plan = MultiCameraEngine.Plan(sources, size, configuration.captureFps)
+        val plan = MultiCameraEngine.Plan(sources)
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             future.get().unbindAll()
@@ -890,7 +940,7 @@ class MainActivity : AppCompatActivity() {
         val ids = plan.sources.map { it.id }
         created.configure(configuration)
         created.configureSourceIds(ids, rotations)
-        created.start(plan.size, rotations[ids.first()] ?: 0) {
+        created.start(plan.sources.map { it.size }, rotations[ids.first()] ?: 0) {
             runOnUiThread {
                 val available = listOfNotNull(created.courtSurface, created.scoreboardSurface, created.clockSurface)
                 if (available.size < ids.size) return@runOnUiThread
@@ -898,62 +948,6 @@ class MainActivity : AppCompatActivity() {
                 engine.start(plan, rotations, ids.mapIndexed { index, id -> id to available[index] }.toMap())
             }
         }
-    }
-
-    @ExperimentalCamera2Interop
-    private fun startGpuCameraXComposition(configuration: BroadcastConfiguration) {
-        val ids = configuration.requiredCameraIds().toList()
-        val size = if (configuration.captureWidth > 0 && configuration.captureHeight > 0) {
-            android.util.Size(configuration.captureWidth, configuration.captureHeight)
-        } else automaticCaptureSize(configuration.requiredCameraIds())
-        val court = cameraFor(configuration.courtCameraId) ?: return
-        val rotations = ids.associateWith { id ->
-            configuration.frameRotation.degrees ?: cameraFor(id)?.let { rotationFor(it.logicalCameraId) } ?: 0
-        }
-        releaseCompositor()
-        val created = GlCompositor { status -> runOnUiThread { binding.broadcastStatus.text = status } }
-        compositor = created
-        created.configure(configuration)
-        created.configureSourceIds(ids, rotations)
-        created.start(size, rotationFor(court.logicalCameraId)) {
-            runOnUiThread {
-                val surfaces = listOfNotNull(created.courtSurface, created.scoreboardSurface, created.clockSurface)
-                if (surfaces.size < ids.size) {
-                    binding.broadcastStatus.text = "Compositor GPU não criou ${ids.size} fontes."
-                    return@runOnUiThread
-                }
-                attachGpuPreview(created)
-                val useCases = ids.mapIndexedNotNull { index, id ->
-                    cameraFor(id)?.let { camera -> id to CameraXSupport.preview(camera, surfaces[index], size, configuration.captureFps) }
-                }.groupBy({ cameraFor(it.first)!!.logicalCameraId }, { it.second as UseCase })
-                val future = ProcessCameraProvider.getInstance(this)
-                future.addListener({
-                    val provider = future.get()
-                    provider.unbindAll()
-                    runCatching { bindCameraGroups(provider, useCases) }
-                        .onSuccess { binding.broadcastStatus.text = "GPU ativa · ${ids.size} câmera(s) · ${size.width}×${size.height}" }
-                        .onFailure { binding.broadcastStatus.text = "Combinação GPU recusada: ${it.message}" }
-                }, ContextCompat.getMainExecutor(this))
-            }
-        }
-    }
-
-    @ExperimentalCamera2Interop
-    private fun bindCameraGroups(provider: ProcessCameraProvider, groups: Map<String, List<UseCase>>) {
-        if (groups.size == 1) {
-            val (logical, useCases) = groups.entries.single()
-            boundCamera = provider.bindToLifecycle(broadcastLifecycle, selectorFor(logical), *useCases.toTypedArray())
-            return
-        }
-        val advertised = provider.availableConcurrentCameraInfos.firstOrNull { group ->
-            group.map { Camera2CameraInfo.from(it).cameraId }.toSet().containsAll(groups.keys)
-        } ?: error("grupo concorrente não anunciado: ${groups.keys.joinToString(" + ")}")
-        val configs = groups.map { (logical, useCases) ->
-            val info = advertised.first { Camera2CameraInfo.from(it).cameraId == logical }
-            val group = UseCaseGroup.Builder().apply { useCases.forEach { useCase -> addUseCase(useCase) } }.build()
-            ConcurrentCamera.SingleCameraConfig(selectorFor(Camera2CameraInfo.from(info).cameraId), group, broadcastLifecycle)
-        }
-        boundCamera = provider.bindToLifecycle(configs).cameras.lastOrNull()
     }
 
     private fun rotationFor(logicalId: String): Int {
@@ -1070,13 +1064,12 @@ class MainActivity : AppCompatActivity() {
     private fun selectorFor(cameraId: String) = CameraXSupport.selectorFor(cameraId)
 
     @ExperimentalCamera2Interop
-    private fun imageAnalysis(camera: CameraInfo): ImageAnalysis {
+    private fun imageAnalysis(camera: CameraInfo, cameraId: String): ImageAnalysis {
         val configuration = readForm()
-        val size = if (configuration.captureWidth > 0 && configuration.captureHeight > 0) {
-            android.util.Size(configuration.captureWidth, configuration.captureHeight)
-        } else automaticCaptureSize(configuration.requiredCameraIds())
+        val settings = configuration.resolvedCaptureSettings(cameraId)
+        val size = captureSizeFor(configuration, cameraId)
         return CameraXSupport.imageAnalysis(
-            camera, size, configuration.captureFps,
+            camera, size, settings.fps,
         )
     }
 
@@ -1147,6 +1140,17 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         stopLevelSensor()
         super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        compositor?.setPreviewEnabled(true)
+    }
+
+    override fun onStop() {
+        // Tela apagada ou app em segundo plano: mantém câmera/encoder, mas não gasta GPU no preview.
+        compositor?.setPreviewEnabled(false)
+        super.onStop()
     }
 
     override fun onResume() {
