@@ -119,6 +119,21 @@ class CompositionGeometryTest {
         assertEquals(CaptureSettings(1920, 1080, 30), configuration.resolvedCaptureSettings("wide"))
     }
 
+    @Test fun `shared camera resolves the largest requested capture zoom`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "shared",
+            scoreboardCameraId = "shared",
+            clockCameraId = "shared",
+            scoreboardEnabled = true,
+            clockEnabled = true,
+            captureZoom = 1.4f,
+            scoreboardCaptureZoom = 5f,
+            clockCaptureZoom = 2f,
+        )
+
+        assertEquals(5f, configuration.resolvedCaptureZoom("shared"))
+    }
+
     @Test fun `simultaneous support follows logical camera groups`() {
         val cameras = listOf(
             CameraInfo("0/wide", "0", "wide", 1f, LensFacing.BACK),

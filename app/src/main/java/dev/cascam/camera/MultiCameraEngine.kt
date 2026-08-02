@@ -2,10 +2,12 @@ package dev.cascam.camera
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
@@ -13,6 +15,7 @@ import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Build
 import android.util.Range
 import android.util.Size
 import android.view.Surface
@@ -34,6 +37,7 @@ class MultiCameraEngine(
         val physicalId: String?,
         val size: Size,
         val fps: Int,
+        val zoom: Float = 1f,
     )
     data class Plan(val sources: List<Source>)
 
@@ -105,16 +109,21 @@ class MultiCameraEngine(
             override fun onConfigured(session: CameraCaptureSession) {
                 sessions[camera.id] = session
                 runCatching {
-                    val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                    val physicalIds = sources.mapNotNull { it.physicalId }.toSet()
+                    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalIds.isNotEmpty()) {
+                        camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD, physicalIds)
+                    } else camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                    val request = builder.apply {
                         sources.forEach { addTarget(surfaces.getValue(it.id)) }
                         set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                         set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                         val requestedFps = sources.maxOfOrNull { it.fps } ?: 0
                         fpsRange(camera.id, requestedFps)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                        applyZooms(camera.id, sources, this)
                     }.build()
                     session.setRepeatingRequest(request, null, handler)
                     if (sessions.size == plan.sources.map { it.logicalId }.distinct().size) {
-                        val profiles = plan.sources.joinToString { "${it.id}=${it.size.width}×${it.size.height}@${it.fps.takeIf { fps -> fps > 0 } ?: "auto"}" }
+                        val profiles = plan.sources.joinToString { "${it.id}=${it.size.width}×${it.size.height}@${it.fps.takeIf { fps -> fps > 0 } ?: "auto"} · %.1f×".format(it.zoom) }
                         onStatus("${plan.sources.size} fonte(s) Camera2 ativas · $profiles")
                     }
                 }.onFailure { fail("não consegui iniciar ${camera.id}: ${it.message}") }
@@ -131,6 +140,50 @@ class MultiCameraEngine(
             .get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?.filter { it.upper == fps }
             ?.minByOrNull { it.upper - it.lower }
+    }
+
+    private fun applyZooms(logicalId: String, sources: List<Source>, builder: CaptureRequest.Builder) {
+        val logical = manager.getCameraCharacteristics(logicalId)
+        val physicalKeys = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { logical.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
+        } else emptyList()
+        sources.filter { it.zoom > 1.001f }.forEach { source ->
+            val physicalId = source.physicalId
+            if (physicalId == null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val range = logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom))
+                }
+                return@forEach
+            }
+            val physical = manager.getCameraCharacteristics(physicalId)
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && physicalKeys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
+                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    val value = source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom)
+                    builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, value, physicalId)
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalKeys.contains(CaptureRequest.SCALER_CROP_REGION) -> {
+                    val active = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@forEach
+                    val maximum = physical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: source.zoom
+                    builder.setPhysicalCameraKey(
+                        CaptureRequest.SCALER_CROP_REGION,
+                        centeredCrop(active, source.zoom.coerceAtMost(maximum)),
+                        physicalId,
+                    )
+                }
+                else -> onStatus("Zoom independente indisponível para ${source.id}; mantendo 1,0×")
+            }
+        }
+    }
+
+    private fun centeredCrop(active: Rect, zoom: Float): Rect {
+        val width = ((active.width() / zoom).toInt().coerceAtLeast(2)) and -2
+        val height = ((active.height() / zoom).toInt().coerceAtLeast(2)) and -2
+        val left = active.left + (active.width() - width) / 2
+        val top = active.top + (active.height() - height) / 2
+        return Rect(left, top, left + width, top + height)
     }
 
     private fun fail(message: String) { running = false; onStatus("Captura múltipla indisponível: $message") }

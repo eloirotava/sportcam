@@ -15,6 +15,7 @@ import android.hardware.camera2.CaptureRequest
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
@@ -146,6 +147,9 @@ class MainActivity : AppCompatActivity() {
         updateCaptureOptions(configuration.courtCameraId, null, configuration.captureWidth to configuration.captureHeight, configuration.captureFps)
         updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.SCOREBOARD), OverlayLayer.SCOREBOARD, configuration.scoreboardCaptureWidth to configuration.scoreboardCaptureHeight, configuration.scoreboardCaptureFps)
         updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.CLOCK), OverlayLayer.CLOCK, configuration.clockCaptureWidth to configuration.clockCaptureHeight, configuration.clockCaptureFps)
+        binding.courtCaptureZoom.progress = zoomProgress(configuration.captureZoom)
+        binding.scoreboardCaptureZoom.progress = zoomProgress(configuration.scoreboardCaptureZoom)
+        binding.clockCaptureZoom.progress = zoomProgress(configuration.clockCaptureZoom)
         binding.broadcastProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BroadcastProtocol.entries.map { it.label })
         binding.broadcastProtocol.setSelection(BroadcastProtocol.entries.indexOf(configuration.protocol))
         binding.videoCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, VideoCodec.entries.map { it.label })
@@ -248,6 +252,20 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
+        listOf(binding.courtCaptureZoom, binding.scoreboardCaptureZoom, binding.clockCaptureZoom).forEach { seekBar ->
+            seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    updateZoomLabels()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    compositionConfiguration = readForm()
+                    if (screen == Screen.COURT || screen == Screen.SCOREBOARD || screen == Screen.CLOCK) {
+                        startCamera(cameraIdFor(screen))
+                    }
+                }
+            })
+        }
         val cameraListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 updateAllCaptureOptions()
@@ -410,12 +428,15 @@ class MainActivity : AppCompatActivity() {
             captureWidth = captureSize.first,
             captureHeight = captureSize.second,
             captureFps = captureFpsOptions.getOrElse(binding.captureFps.selectedItemPosition) { 0 },
+            captureZoom = captureZoom(binding.courtCaptureZoom.progress),
             scoreboardCaptureWidth = scoreboardCaptureSize.first,
             scoreboardCaptureHeight = scoreboardCaptureSize.second,
             scoreboardCaptureFps = scoreboardCaptureFpsOptions.getOrElse(binding.scoreboardCaptureFps.selectedItemPosition) { 0 },
+            scoreboardCaptureZoom = captureZoom(binding.scoreboardCaptureZoom.progress),
             clockCaptureWidth = clockCaptureSize.first,
             clockCaptureHeight = clockCaptureSize.second,
             clockCaptureFps = clockCaptureFpsOptions.getOrElse(binding.clockCaptureFps.selectedItemPosition) { 0 },
+            clockCaptureZoom = captureZoom(binding.clockCaptureZoom.progress),
             protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             videoCodec = VideoCodec.entries[binding.videoCodec.selectedItemPosition],
             bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
@@ -766,12 +787,19 @@ class MainActivity : AppCompatActivity() {
             binding.captureResolution, binding.captureFps, binding.compositionEngine, binding.frameRotation,
             binding.scoreboardCaptureResolution, binding.scoreboardCaptureFps,
             binding.clockCaptureResolution, binding.clockCaptureFps,
+            binding.courtCaptureZoom, binding.scoreboardCaptureZoom, binding.clockCaptureZoom,
         ).forEach { it.isEnabled = enabled }
     }
 
     private fun updateZoomLabels() {
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
+        binding.courtCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.courtCaptureZoom.progress))
+        binding.scoreboardCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
+        binding.clockCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.clockCaptureZoom.progress))
     }
+
+    private fun captureZoom(progress: Int): Float = 1f + progress.coerceIn(0, 70) / 10f
+    private fun zoomProgress(zoom: Float): Int = ((zoom.coerceIn(1f, 8f) - 1f) * 10f).toInt()
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     private fun requestCameraIfNeeded() {
@@ -794,6 +822,15 @@ class MainActivity : AppCompatActivity() {
             Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
             )
+            val previewZoom = when (screen) {
+                Screen.COURT -> captureZoom(binding.courtCaptureZoom.progress)
+                Screen.SCOREBOARD -> captureZoom(binding.scoreboardCaptureZoom.progress)
+                Screen.CLOCK -> captureZoom(binding.clockCaptureZoom.progress)
+                else -> 1f
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && previewZoom > 1f) {
+                Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_ZOOM_RATIO, previewZoom)
+            }
             camera?.physicalCameraId?.let { Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(it) }
             val preview = previewBuilder.build().also { it.surfaceProvider = binding.preview.surfaceProvider }
             provider.unbindAll()
@@ -906,7 +943,10 @@ class MainActivity : AppCompatActivity() {
         val ids = configuration.requiredCameraIds().toList()
         val sources = ids.mapNotNull { id -> cameraFor(id)?.let { camera ->
             val settings = configuration.resolvedCaptureSettings(id)
-            MultiCameraEngine.Source(id, camera.logicalCameraId, camera.physicalCameraId, captureSizeFor(configuration, id), settings.fps)
+            MultiCameraEngine.Source(
+                id, camera.logicalCameraId, camera.physicalCameraId,
+                captureSizeFor(configuration, id), settings.fps, configuration.resolvedCaptureZoom(id),
+            )
         } }
         if (sources.size != ids.size) return
         val rotations = sources.associate { it.id to rotationFor(it.logicalId) }

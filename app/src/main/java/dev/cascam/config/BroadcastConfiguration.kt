@@ -20,12 +20,15 @@ data class BroadcastConfiguration(
     val captureWidth: Int = 0,
     val captureHeight: Int = 0,
     val captureFps: Int = 0,
+    val captureZoom: Float = 1f,
     val scoreboardCaptureWidth: Int = 0,
     val scoreboardCaptureHeight: Int = 0,
     val scoreboardCaptureFps: Int = 0,
+    val scoreboardCaptureZoom: Float = 1f,
     val clockCaptureWidth: Int = 0,
     val clockCaptureHeight: Int = 0,
     val clockCaptureFps: Int = 0,
+    val clockCaptureZoom: Float = 1f,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val videoCodec: VideoCodec = VideoCodec.H264,
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
@@ -72,6 +75,13 @@ data class BroadcastConfiguration(
         val largest = requested.filter { it.hasSize }.maxByOrNull { it.width.toLong() * it.height }
         return CaptureSettings(largest?.width ?: 0, largest?.height ?: 0, requested.maxOfOrNull { it.fps } ?: 0)
     }
+
+    /** Uma câmera compartilhada só produz um stream; nesse caso prevalece o maior zoom pedido. */
+    fun resolvedCaptureZoom(cameraId: String): Float = buildList {
+        if (courtCameraId == cameraId) add(captureZoom)
+        if (scoreboardEnabled && cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId) add(scoreboardCaptureZoom)
+        if (clockEnabled && cameraIdFor(OverlayLayer.CLOCK) == cameraId) add(clockCaptureZoom)
+    }.maxOrNull()?.coerceIn(1f, 8f) ?: 1f
 }
 
 data class CaptureSettings(val width: Int = 0, val height: Int = 0, val fps: Int = 0) {

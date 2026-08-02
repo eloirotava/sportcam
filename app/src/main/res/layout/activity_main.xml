@@ -94,6 +94,9 @@
                     <TextView style="@style/PanelText" android:text="Verde: recorte 16:9 da quadra. Azul: destino do placar. Roxo: destino do cronômetro. Escolha abaixo qual destino será arrastado. A linha central indica o nível." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelLabel" android:text="Zoom real da câmera da quadra" />
+                    <SeekBar android:id="@+id/court_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
+                    <TextView android:id="@+id/court_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
                     <TextView style="@style/PanelLabel" android:text="Sobreposição que será posicionada" />
                     <Spinner android:id="@+id/court_overlay" android:layout_width="match_parent" android:layout_height="48dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
@@ -113,6 +116,9 @@
                     <Spinner android:id="@+id/scoreboard_capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
                     <Spinner android:id="@+id/scoreboard_capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelLabel" android:text="Zoom real da câmera do placar" />
+                    <SeekBar android:id="@+id/scoreboard_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
+                    <TextView android:id="@+id/scoreboard_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/scoreboard_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
                     <TextView android:id="@+id/scoreboard_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
@@ -128,6 +134,9 @@
                     <Spinner android:id="@+id/clock_capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
                     <Spinner android:id="@+id/clock_capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelLabel" android:text="Zoom real da câmera do cronômetro" />
+                    <SeekBar android:id="@+id/clock_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
+                    <TextView android:id="@+id/clock_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/clock_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
                     <TextView android:id="@+id/clock_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
