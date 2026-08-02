@@ -70,10 +70,8 @@ class YoutubePublisher(
             val supportedColors = codec.codecInfo.getCapabilitiesForType(videoMime).colorFormats.toSet()
             val colorFormat = when {
                 useSurfaceInput -> MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar in supportedColors ->
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar in supportedColors ->
-                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+                YUV420_SEMI_PLANAR in supportedColors -> YUV420_SEMI_PLANAR
+                YUV420_PLANAR in supportedColors -> YUV420_PLANAR
                 else -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
             }
             val format = MediaFormat.createVideoFormat(videoMime, videoWidth, videoHeight).apply {
@@ -181,7 +179,7 @@ class YoutubePublisher(
             v[chromaIndex] = (((112 * averageR - 94 * averageG - 18 * averageB + 128) shr 8) + 128).coerceIn(16, 240).toByte()
             chromaIndex++
         }
-        if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) {
+        if (colorFormat == YUV420_SEMI_PLANAR) {
             for (index in u.indices) { output.put(u[index]); output.put(v[index]) }
         } else {
             output.put(u); output.put(v)
@@ -280,5 +278,12 @@ class YoutubePublisher(
         /** Taxa de captura confirmada com os dois sensores físicos ligados juntos. */
         const val FPS = 20
         private const val AUDIO_RATE = 44_100
+
+        // Ainda são os identificadores que codecs ByteBuffer legados anunciam em colorFormats.
+        // A anotação fica só aqui para não esconder outras APIs obsoletas no publisher.
+        @Suppress("DEPRECATION")
+        private const val YUV420_SEMI_PLANAR = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+        @Suppress("DEPRECATION")
+        private const val YUV420_PLANAR = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
     }
 }
