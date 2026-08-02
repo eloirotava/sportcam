@@ -17,6 +17,7 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
+import android.util.Range
 import android.view.Surface
 import java.util.concurrent.Executor
 
@@ -44,6 +45,7 @@ class DualCameraEngine(
         val scoreboardPhysicalId: String,
         val size: Size,
         val perPhysicalZoom: PerPhysicalZoom,
+        val fpsRange: Range<Int>? = null,
     )
 
     private val thread = HandlerThread("cascam-dual-camera").also { it.start() }
@@ -71,14 +73,17 @@ class DualCameraEngine(
      * Monta o plano de captura para o par escolhido, ou devolve null quando os dois não são
      * sensores físicos da mesma câmera lógica — aí quem chama segue pelo caminho antigo.
      */
-    fun planFor(capabilities: CameraCapabilities, court: CameraInfo, scoreboard: CameraInfo, ceiling: Size): Plan? {
+    fun planFor(capabilities: CameraCapabilities, court: CameraInfo, scoreboard: CameraInfo, ceiling: Size, fps: Int = 0): Plan? {
         val courtPhysical = court.physicalCameraId ?: return null
         val scoreboardPhysical = scoreboard.physicalCameraId ?: return null
         if (court.logicalCameraId != scoreboard.logicalCameraId) return null
         if (courtPhysical == scoreboardPhysical) return null
         val size = commonSize(courtPhysical, scoreboardPhysical, ceiling) ?: return null
         val logical = capabilities.camera(court.logicalCameraId)
-        return Plan(court.logicalCameraId, courtPhysical, scoreboardPhysical, size, logical?.perPhysicalZoom ?: PerPhysicalZoom.NONE)
+        val fpsRange = logical?.fpsRanges?.filter { fps <= 0 || it.upper == fps }
+            ?.minByOrNull { it.upper - it.lower }
+            ?.takeIf { fps > 0 }
+        return Plan(court.logicalCameraId, courtPhysical, scoreboardPhysical, size, logical?.perPhysicalZoom ?: PerPhysicalZoom.NONE, fpsRange)
     }
 
     /**
@@ -90,6 +95,8 @@ class DualCameraEngine(
     fun start(plan: Plan, rotation: Int, outputs: Pair<Surface, Surface>? = null) {
         stop()
         this.plan = plan
+        courtTargetWidth = plan.size.width
+        scoreboardTargetWidth = plan.size.width
         rotationDegrees = ((rotation % 360) + 360) % 360
         running = true
         frameCounts.clear()
@@ -164,7 +171,7 @@ class DualCameraEngine(
             override fun onConfigured(configured: CameraCaptureSession) {
                 session = configured
                 applyRequest()
-                onStatus("Dois sensores ativos: quadra ${plan.courtPhysicalId}, placar ${plan.scoreboardPhysicalId} a ${plan.size.width}x${plan.size.height}.")
+                onStatus("Dois sensores ativos: quadra ${plan.courtPhysicalId}, auxiliar ${plan.scoreboardPhysicalId} a ${plan.size.width}x${plan.size.height}.")
             }
 
             override fun onConfigureFailed(configured: CameraCaptureSession) =
@@ -194,6 +201,7 @@ class DualCameraEngine(
                 // recorte para ter para onde compensar o tremor. Em tripé isso é enquadramento
                 // perdido de graça, então volta desligada.
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                plan.fpsRange?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
             }
             configured.setRepeatingRequest(builder.build(), null, handler)
         } catch (error: CameraAccessException) {
@@ -230,7 +238,7 @@ class DualCameraEngine(
         val scoreboard = (frameCounts[Role.SCOREBOARD] ?: 0) / seconds
         frameCounts.clear()
         lastReportAt = now
-        onStatus("Quadra %.0f fps · placar %.0f fps".format(court, scoreboard))
+        onStatus("Quadra %.0f fps · auxiliar %.0f fps".format(court, scoreboard))
     }
 
     private fun commonSize(physicalA: String, physicalB: String, ceiling: Size): Size? {

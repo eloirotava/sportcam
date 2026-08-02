@@ -19,29 +19,27 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - projeto Android nativo (Kotlin, minSdk 31);
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
-- quadrilátero de quatro pontos para capturar/planificar o placar e retângulo de duas
-  alças para seu destino na composição;
-- seleção independente da câmera da quadra e do placar, incluindo lentes traseiras,
+- placar e cronômetro filmados opcionais, cada um com quadrilátero de quatro pontos
+  para planificar a origem e retângulo próprio de destino na composição;
+- seleção independente da câmera da quadra, do placar e do cronômetro, incluindo lentes traseiras,
   frontais e externas anunciadas pelo Android;
+- compartilhamento de um único stream quando duas ou três camadas escolhem a mesma câmera;
+- seleção de resolução e FPS limitada à interseção anunciada pelas fontes habilitadas;
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
   servidor/chave do YouTube, persistidos localmente;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
-A interface agora é dividida em três telas: **Quadra**, onde o retângulo 16:9 é
+A interface é dividida em **Quadra**, onde o retângulo 16:9 é
 movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
-ajustados a área amarela capturada e o retângulo azul de destino, além da câmera e seu
-zoom; e **Ao vivo**, que reúne a composição e os
-dados do YouTube. O botão de play agora codifica a composição em H.264 (720p, 15 fps,
-3 Mbps), captura o microfone em AAC mono a 44,1 kHz, empacota áudio e vídeo em
-mensagens RTMP e publica por RTMPS no servidor e chave configurados. Metadados do
-stream e cabeçalhos AVC/AAC são enviados antes da mídia. Quando o aparelho expõe o par simultâneo, a tela Ao vivo já abre
-as duas fontes, converte os frames YUV, faz o crop real da quadra e aplica a homografia
-dos quatro pontos do placar para retificá-lo no PiP, sem os guias de configuração.
-Esta primeira composição é desenhada na CPU para validar o resultado no aparelho; a
-versão GPU será necessária para alimentar o encoder com desempenho sustentado. A tela
-informa o estado explicitamente para não simular uma live e permanece ligada durante
-o uso, sem depender de toques periódicos.
+ajustados a área amarela capturada, a câmera e o zoom de visualização; **Cronômetro**,
+com os mesmos ajustes para a área roxa; e **Ao vivo**, que reúne a composição e os
+dados do YouTube. O botão de play codifica a composição em H.264/H.265, usando o FPS
+de captura selecionado (20 fps no automático), captura o microfone em AAC mono a
+44,1 kHz e publica por RTMPS ou ingestão HLS. Quando o aparelho anuncia o grupo
+simultâneo, a tela Ao vivo abre as fontes distintas selecionadas; camadas que apontam
+para a mesma câmera compartilham o stream. CPU e GPU fazem o recorte da quadra e
+aplicam a homografia dos quatro pontos de cada sobreposição, sem transmitir os guias.
 
 Os seletores distinguem câmeras **lógicas** e sensores **físicos** anunciados dentro
 delas. Isso evita que ultra-wide e principal acabem resolvendo para a mesma câmera

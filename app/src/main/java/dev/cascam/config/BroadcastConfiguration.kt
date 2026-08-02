@@ -38,7 +38,7 @@ data class BroadcastConfiguration(
         courtCameraId.takeIf(String::isNotBlank)?.let(::add)
         if (scoreboardEnabled) add(scoreboardCameraId.ifBlank { courtCameraId })
         if (clockEnabled) add(clockCameraId.ifBlank { courtCameraId })
-    }.filterTo(linkedSetOf(), String::isNotBlank)
+    }.filterTo(linkedSetOf()) { it.isNotBlank() }
 
     fun cameraIdFor(layer: OverlayLayer): String = when (layer) {
         OverlayLayer.SCOREBOARD -> scoreboardCameraId

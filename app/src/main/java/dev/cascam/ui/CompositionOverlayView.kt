@@ -12,6 +12,9 @@ import android.view.View
 import kotlin.math.abs
 import dev.cascam.config.DEFAULT_SCOREBOARD_CORNERS
 import dev.cascam.config.DEFAULT_SCOREBOARD_DESTINATION
+import dev.cascam.config.DEFAULT_CLOCK_CORNERS
+import dev.cascam.config.DEFAULT_CLOCK_DESTINATION
+import dev.cascam.config.OverlayLayer
 import dev.cascam.geometry.NormalizedPoint
 import dev.cascam.geometry.NormalizedRect
 
@@ -19,7 +22,7 @@ class CompositionOverlayView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
-    enum class Mode { COMPOSITION, COURT, SCOREBOARD }
+    enum class Mode { COMPOSITION, COURT, SCOREBOARD, CLOCK }
 
     private val cropPaint = strokePaint(Color.rgb(115, 226, 167))
     private val cropHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(115, 226, 167) }
@@ -27,15 +30,22 @@ class CompositionOverlayView @JvmOverloads constructor(
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 196, 77) }
     private val destinationPaint = strokePaint(Color.rgb(65, 170, 255))
     private val destinationHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(65, 170, 255) }
+    private val clockPaint = strokePaint(Color.rgb(208, 128, 255))
+    private val clockHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(208, 128, 255) }
     private val levelPaint = strokePaint(Color.rgb(255, 196, 77))
     private val levelReferencePaint = strokePaint(Color.argb(140, 255, 255, 255))
     private val levelTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
-    private val strokePaints = listOf(cropPaint, quadPaint, destinationPaint)
+    private val strokePaints = listOf(cropPaint, quadPaint, destinationPaint, clockPaint)
     private val corners = DEFAULT_SCOREBOARD_CORNERS.toMutableList()
+    private val clockCorners = DEFAULT_CLOCK_CORNERS.toMutableList()
     private var destination = DEFAULT_SCOREBOARD_DESTINATION
+    private var clockDestination = DEFAULT_CLOCK_DESTINATION
+    private var selectedDestination = OverlayLayer.SCOREBOARD
+    private var scoreboardEnabled = true
+    private var clockEnabled = false
     private var mode = Mode.COMPOSITION
     private var activeCorner: Int? = null
     private var editingDestination = false
@@ -102,12 +112,20 @@ class CompositionOverlayView @JvmOverloads constructor(
     fun scoreboardCorners(): List<NormalizedPoint> = corners.toList()
     fun setScoreboardDestination(rect: NormalizedRect) { destination = rect; invalidate() }
     fun scoreboardDestination(): NormalizedRect = destination
+    fun setClockCorners(points: List<NormalizedPoint>) { require(points.size == 4); clockCorners.clear(); clockCorners.addAll(points); invalidate() }
+    fun clockCorners(): List<NormalizedPoint> = clockCorners.toList()
+    fun setClockDestination(rect: NormalizedRect) { clockDestination = rect; invalidate() }
+    fun clockDestination(): NormalizedRect = clockDestination
+    fun setEnabledOverlays(scoreboard: Boolean, clock: Boolean) {
+        scoreboardEnabled = scoreboard; clockEnabled = clock; invalidate()
+    }
+    fun selectDestination(layer: OverlayLayer) { selectedDestination = layer; invalidate() }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width == 0 || height == 0) return
         if (mode == Mode.COURT) { drawCrop(canvas); drawLevel(canvas) }
-        if (mode == Mode.SCOREBOARD) drawScoreboard(canvas)
+        if (mode == Mode.SCOREBOARD || mode == Mode.CLOCK) drawScoreboard(canvas)
     }
 
     private fun drawCrop(canvas: Canvas) {
@@ -117,13 +135,16 @@ class CompositionOverlayView @JvmOverloads constructor(
         canvas.drawCircle(crop.right * width, crop.bottom * height, handleRadius, cropHandlePaint)
         // O retângulo verde é o quadro que vai ao ar, então a posição do placar é ajustada dentro
         // dele: é o único lugar da tela onde ela significa o que vai significar na transmissão.
-        val left = destinationPixelX(destination.left)
-        val top = destinationPixelY(destination.top)
-        val right = destinationPixelX(destination.right)
-        val bottom = destinationPixelY(destination.bottom)
-        canvas.drawRect(left, top, right, bottom, destinationPaint)
-        canvas.drawCircle(left, top, handleRadius, destinationHandlePaint)
-        canvas.drawCircle(right, bottom, handleRadius, destinationHandlePaint)
+        if (scoreboardEnabled) drawDestination(canvas, destination, destinationPaint, destinationHandlePaint)
+        if (clockEnabled) drawDestination(canvas, clockDestination, clockPaint, clockHandlePaint)
+    }
+
+    private fun drawDestination(canvas: Canvas, rect: NormalizedRect, paint: Paint, handles: Paint) {
+        val left = destinationPixelX(rect.left); val top = destinationPixelY(rect.top)
+        val right = destinationPixelX(rect.right); val bottom = destinationPixelY(rect.bottom)
+        canvas.drawRect(left, top, right, bottom, paint)
+        canvas.drawCircle(left, top, handleRadius, handles)
+        canvas.drawCircle(right, bottom, handleRadius, handles)
     }
 
     /**
@@ -162,12 +183,13 @@ class CompositionOverlayView @JvmOverloads constructor(
 
     private fun drawScoreboard(canvas: Canvas) {
         val path = Path()
-        corners.forEachIndexed { index, point ->
+        val edited = editedCorners()
+        edited.forEachIndexed { index, point ->
             val x = point.x * width; val y = point.y * height
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            canvas.drawCircle(x, y, handleRadius, handlePaint)
+            canvas.drawCircle(x, y, handleRadius, if (mode == Mode.CLOCK) clockHandlePaint else handlePaint)
         }
-        path.close(); canvas.drawPath(path, quadPaint)
+        path.close(); canvas.drawPath(path, if (mode == Mode.CLOCK) clockPaint else quadPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -184,7 +206,7 @@ class CompositionOverlayView @JvmOverloads constructor(
                     activeCorner = if (editingDestination) destinationCorner ?: -1 else null
                     activeCropCorner = if (editingDestination) null else nearestCropCorner(event.x, event.y)
                 }
-                if (mode == Mode.SCOREBOARD) {
+                if (mode == Mode.SCOREBOARD || mode == Mode.CLOCK) {
                     editingDestination = false
                     activeCorner = nearestCorner(event.x, event.y)
                         ?: if (insideScoreboard(event.x, event.y)) -1 else null
@@ -202,7 +224,7 @@ class CompositionOverlayView @JvmOverloads constructor(
                             ?: moveCrop(event.x - lastX, event.y - lastY)
                     }
                 }
-                if (mode == Mode.SCOREBOARD) {
+                if (mode == Mode.SCOREBOARD || mode == Mode.CLOCK) {
                     val corner = activeCorner
                     when {
                         corner == null -> onPanRequested?.invoke(event.x - lastX, event.y - lastY)
@@ -226,9 +248,17 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun notifyCropChanged() { invalidate(); onCropChanged?.invoke(cropZoom, cropPanX, cropPanY) }
-    private fun nearestCorner(x: Float, y: Float): Int? = corners.indices.minByOrNull { i ->
-        val dx = x - corners[i].x * width; val dy = y - corners[i].y * height; dx * dx + dy * dy
-    }?.takeIf { i -> distanceSquared(x, y, corners[i].x * width, corners[i].y * height) <= touchRadius * touchRadius }
+    private fun editedCorners() = if (mode == Mode.CLOCK) clockCorners else corners
+    private fun editedDestination() = if (selectedDestination == OverlayLayer.CLOCK) clockDestination else destination
+    private fun updateEditedDestination(value: NormalizedRect) {
+        if (selectedDestination == OverlayLayer.CLOCK) clockDestination = value else destination = value
+    }
+
+    private fun nearestCorner(x: Float, y: Float): Int? = editedCorners().let { points ->
+        points.indices.minByOrNull { i ->
+            val dx = x - points[i].x * width; val dy = y - points[i].y * height; dx * dx + dy * dy
+        }?.takeIf { i -> distanceSquared(x, y, points[i].x * width, points[i].y * height) <= touchRadius * touchRadius }
+    }
 
     private fun nearestCropCorner(x: Float, y: Float): Int? {
         val crop = NormalizedRect.adjustable16x9(width, height, cropZoom, cropPanX, cropPanY)
@@ -238,6 +268,7 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun nearestDestinationCorner(x: Float, y: Float): Int? {
+        val destination = editedDestination()
         val points = listOf(
             destinationPixelX(destination.left) to destinationPixelY(destination.top),
             destinationPixelX(destination.right) to destinationPixelY(destination.bottom),
@@ -272,16 +303,18 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun resizeScoreboard(corner: Int, x: Float, y: Float) {
-        val previous = corners[corner]
-        corners[corner] = normalized(x, y)
-        if (!isValidScoreboard()) corners[corner] = previous
+        val points = editedCorners()
+        val previous = points[corner]
+        points[corner] = normalized(x, y)
+        if (!isValidScoreboard()) points[corner] = previous
         invalidate()
     }
 
     private fun insideScoreboard(x: Float, y: Float): Boolean =
         android.graphics.Region().apply {
+            val points = editedCorners()
             val path = Path().apply {
-                corners.forEachIndexed { index, point ->
+                points.forEachIndexed { index, point ->
                     val px = point.x * this@CompositionOverlayView.width
                     val py = point.y * this@CompositionOverlayView.height
                     if (index == 0) moveTo(px, py) else lineTo(px, py)
@@ -291,33 +324,36 @@ class CompositionOverlayView @JvmOverloads constructor(
             setPath(path, android.graphics.Region(0, 0, this@CompositionOverlayView.width, this@CompositionOverlayView.height))
         }.contains(x.toInt(), y.toInt())
 
-    private fun scoreboardArea(): Float = corners.indices.sumOf { index ->
-        val current = corners[index]
-        val next = corners[(index + 1) % corners.size]
+    private fun scoreboardArea(): Float = editedCorners().let { points -> points.indices.sumOf { index ->
+        val current = points[index]
+        val next = points[(index + 1) % points.size]
         (current.x * next.y - next.x * current.y).toDouble()
-    }.toFloat() / 2f
+    }.toFloat() / 2f }
 
     private fun isValidScoreboard(): Boolean {
         if (kotlin.math.abs(scoreboardArea()) < .001f) return false
-        val crosses = corners.indices.map { index ->
-            val a = corners[index]
-            val b = corners[(index + 1) % corners.size]
-            val c = corners[(index + 2) % corners.size]
+        val points = editedCorners()
+        val crosses = points.indices.map { index ->
+            val a = points[index]
+            val b = points[(index + 1) % points.size]
+            val c = points[(index + 2) % points.size]
             (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
         }
         return crosses.all { it > .0001f } || crosses.all { it < -.0001f }
     }
 
     private fun moveScoreboard(dx: Float, dy: Float) {
-        val normalizedDx = (dx / width).coerceIn(-corners.minOf { it.x }, 1f - corners.maxOf { it.x })
-        val normalizedDy = (dy / height).coerceIn(-corners.minOf { it.y }, 1f - corners.maxOf { it.y })
-        corners.indices.forEach { index ->
-            corners[index] = NormalizedPoint(corners[index].x + normalizedDx, corners[index].y + normalizedDy)
+        val points = editedCorners()
+        val normalizedDx = (dx / width).coerceIn(-points.minOf { it.x }, 1f - points.maxOf { it.x })
+        val normalizedDy = (dy / height).coerceIn(-points.minOf { it.y }, 1f - points.maxOf { it.y })
+        points.indices.forEach { index ->
+            points[index] = NormalizedPoint(points[index].x + normalizedDx, points[index].y + normalizedDy)
         }
         invalidate()
     }
 
     private fun insideDestination(x: Float, y: Float): Boolean {
+        val destination = editedDestination()
         val point = destinationNormalized(x, y)
         return point.first in destination.left..destination.right && point.second in destination.top..destination.bottom
     }
@@ -331,25 +367,27 @@ class CompositionOverlayView @JvmOverloads constructor(
     }
 
     private fun resizeDestination(corner: Int, x: Float, y: Float) {
+        val destination = editedDestination()
         val moving = destinationNormalized(x, y).let { NormalizedPoint(it.first, it.second) }
         val fixedX = if (corner == 0) destination.right else destination.left
         val fixedY = if (corner == 0) destination.bottom else destination.top
         val left = minOf(moving.x, fixedX); val right = maxOf(moving.x, fixedX)
         val top = minOf(moving.y, fixedY); val bottom = maxOf(moving.y, fixedY)
         if (right - left >= .02f && bottom - top >= .02f) {
-            destination = NormalizedRect(left, top, right, bottom)
+            updateEditedDestination(NormalizedRect(left, top, right, bottom))
             invalidate()
         }
     }
 
     private fun moveDestination(dx: Float, dy: Float) {
         val crop = cropRect()
+        val destination = editedDestination()
         val normalizedDx = (dx / width / crop.width).coerceIn(-destination.left, 1f - destination.right)
         val normalizedDy = (dy / height / crop.height).coerceIn(-destination.top, 1f - destination.bottom)
-        destination = NormalizedRect(
+        updateEditedDestination(NormalizedRect(
             destination.left + normalizedDx, destination.top + normalizedDy,
             destination.right + normalizedDx, destination.bottom + normalizedDy,
-        )
+        ))
         invalidate()
     }
 

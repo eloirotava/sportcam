@@ -22,6 +22,7 @@ class YoutubePublisher(
     private val serverUrl: String,
     private val streamKey: String,
     private val latency: LiveLatency,
+    private val fps: Int = FPS,
     /**
      * Em modo surface o encoder recebe os quadros direto de uma Surface, que é o que o caminho
      * GPU alimenta por OpenGL. Aí [offer] não é usado e não existe conversão em CPU nenhuma.
@@ -63,7 +64,7 @@ class YoutubePublisher(
                 BroadcastProtocol.HLS -> HlsTransport(serverUrl, streamKey, videoCodec, latency.segmentMillis, onStatus)
             }
             activeTransport = connectedTransport; connectedTransport.connect(); transport = connectedTransport
-            connectedTransport.sendMetadata(videoWidth, videoHeight, FPS, videoBitrate)
+            connectedTransport.sendMetadata(videoWidth, videoHeight, fps, videoBitrate)
             val videoMime = if (videoCodec == VideoCodec.H265) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
             codec = MediaCodec.createEncoderByType(videoMime)
             val supportedColors = codec.codecInfo.getCapabilitiesForType(videoMime).colorFormats.toSet()
@@ -78,7 +79,7 @@ class YoutubePublisher(
             val format = MediaFormat.createVideoFormat(videoMime, videoWidth, videoHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
                 setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
+                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                 // O segmento HLS só fecha em keyframe: GOP maior que o segmento trava a latência
                 // no GOP, não no segmento pedido.
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, (latency.segmentMillis / 1_000).coerceAtLeast(1))

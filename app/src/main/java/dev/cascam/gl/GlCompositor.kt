@@ -50,21 +50,29 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     private var samplerHandle = 0
     private var courtTexture = 0
     private var scoreboardTexture = 0
+    private var clockTexture = 0
     private var courtStream: SurfaceTexture? = null
     private var scoreboardStream: SurfaceTexture? = null
+    private var clockStream: SurfaceTexture? = null
     private val courtMatrix = FloatArray(16)
     private val scoreboardMatrix = FloatArray(16)
+    private val clockMatrix = FloatArray(16)
     private var courtPending = false
     private var scoreboardPending = false
+    private var clockPending = false
     private var captureSize = Size(1920, 1080)
     private var rotationDegrees = 0
 
     @Volatile private var configuration = BroadcastConfiguration()
+    @Volatile private var sourceIds: List<String> = emptyList()
+    @Volatile private var sourceRotations: Map<String, Int> = emptyMap()
     @Volatile private var ready = false
 
     var courtSurface: Surface? = null
         private set
     var scoreboardSurface: Surface? = null
+        private set
+    var clockSurface: Surface? = null
         private set
 
     val isReady: Boolean get() = ready
@@ -79,6 +87,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 program = buildProgram()
                 courtTexture = createExternalTexture()
                 scoreboardTexture = createExternalTexture()
+                clockTexture = createExternalTexture()
                 courtStream = SurfaceTexture(courtTexture).apply {
                     setDefaultBufferSize(size.width, size.height)
                     setOnFrameAvailableListener({ courtPending = true; handler.post(::render) }, handler)
@@ -87,8 +96,13 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                     setDefaultBufferSize(size.width, size.height)
                     setOnFrameAvailableListener({ scoreboardPending = true }, handler)
                 }
+                clockStream = SurfaceTexture(clockTexture).apply {
+                    setDefaultBufferSize(size.width, size.height)
+                    setOnFrameAvailableListener({ clockPending = true }, handler)
+                }
                 courtSurface = Surface(courtStream)
                 scoreboardSurface = Surface(scoreboardStream)
+                clockSurface = Surface(clockStream)
                 ready = true
             }.onSuccess { onReady() }.onFailure { onStatus("Composição GPU indisponível: ${it.message}") }
         }
@@ -96,6 +110,11 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
 
     fun configure(value: BroadcastConfiguration) {
         configuration = value
+    }
+
+    /** Ordem das texturas: quadra, auxiliar/placar e cronômetro distinto. */
+    fun configureSourceIds(ids: List<String>, rotations: Map<String, Int> = emptyMap()) {
+        sourceIds = ids; sourceRotations = rotations
     }
 
     fun addTarget(
@@ -126,10 +145,10 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             ready = false
             targets.forEach { runCatching { egl.releaseSurface(it.eglSurface) } }
             targets.clear()
-            courtSurface?.release(); scoreboardSurface?.release()
-            courtStream?.release(); scoreboardStream?.release()
-            courtSurface = null; scoreboardSurface = null
-            courtStream = null; scoreboardStream = null
+            courtSurface?.release(); scoreboardSurface?.release(); clockSurface?.release()
+            courtStream?.release(); scoreboardStream?.release(); clockStream?.release()
+            courtSurface = null; scoreboardSurface = null; clockSurface = null
+            courtStream = null; scoreboardStream = null; clockStream = null
             offscreen?.let { runCatching { egl.releaseSurface(it) } }
             offscreen = null
             egl.release()
@@ -156,10 +175,16 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             scoreboardStream?.updateTexImage()
             scoreboardStream?.getTransformMatrix(scoreboardMatrix)
         }
+        if (clockPending) {
+            clockPending = false
+            clockStream?.updateTexImage()
+            clockStream?.getTransformMatrix(clockMatrix)
+        }
         if (targets.isEmpty()) return
 
         val config = configuration
-        val rotation = Homography.inverseRotation(rotationDegrees)
+        val courtDegrees = sourceRotations[sourceIds.getOrNull(0)] ?: rotationDegrees
+        val rotation = Homography.inverseRotation(courtDegrees)
         // O recorte vale sobre a imagem **já girada**, como no caminho em CPU, que gira o bitmap
         // antes de recortar. Um quarto de volta troca largura por altura, e usar as dimensões
         // erradas estica a imagem para preencher o 16:9.
@@ -167,13 +192,19 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         // O giro líquido não é só o pedido aqui: a SurfaceTexture pode entregar o quadro já girado,
         // e nesse caso a matriz dela troca os eixos. Quando os dois giram, um desfaz o outro e o
         // recorte volta a ser o da orientação original — daí o ou-exclusivo em vez do teste direto.
-        val quarterTurn = (rotationDegrees % 180 != 0) != streamSwapsAxes(courtMatrix)
+        val quarterTurn = (courtDegrees % 180 != 0) != streamSwapsAxes(courtMatrix)
         val cropWidth = if (quarterTurn) captureSize.height else captureSize.width
         val cropHeight = if (quarterTurn) captureSize.width else captureSize.height
         val crop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
         val courtMap = Homography.multiply(rotation, Homography.unitSquareTo(crop.left, crop.top, crop.width, crop.height))
-        val scoreboardMap = Homography.multiply(rotation, Homography.unitSquareTo(config.scoreboardCorners))
+        val scoreboardSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
+        val scoreboardRotation = Homography.inverseRotation(sourceRotations[scoreboardSource] ?: courtDegrees)
+        val scoreboardMap = Homography.multiply(scoreboardRotation, Homography.unitSquareTo(config.scoreboardCorners))
+        val clockSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
+        val clockRotation = Homography.inverseRotation(sourceRotations[clockSource] ?: courtDegrees)
+        val clockMap = Homography.multiply(clockRotation, Homography.unitSquareTo(config.clockCorners))
         val destination = config.scoreboardDestination
+        val clockDestination = config.clockDestination
 
         targets.toList().forEach { target ->
             runCatching {
@@ -187,11 +218,28 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 GLES20.glVertexAttribPointer(unitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
 
                 drawQuad(courtTexture, courtMatrix, courtMap, -1f, 1f, 1f, -1f)
-                drawQuad(
-                    scoreboardTexture, scoreboardMatrix, scoreboardMap,
-                    destination.left * 2f - 1f, 1f - destination.top * 2f,
-                    destination.right * 2f - 1f, 1f - destination.bottom * 2f,
-                )
+                if (config.scoreboardEnabled) {
+                    val scoreboardIndex = sourceIds.indexOf(config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD))
+                    drawQuad(
+                        when (scoreboardIndex) { 0 -> courtTexture; 2 -> clockTexture; else -> scoreboardTexture },
+                        when (scoreboardIndex) { 0 -> courtMatrix; 2 -> clockMatrix; else -> scoreboardMatrix },
+                        scoreboardMap,
+                        destination.left * 2f - 1f, 1f - destination.top * 2f,
+                        destination.right * 2f - 1f, 1f - destination.bottom * 2f,
+                    )
+                }
+                if (config.clockEnabled) {
+                    val clockCamera = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
+                    val fromCourt = sourceIds.getOrNull(0) == clockCamera
+                    val fromScoreboard = sourceIds.getOrNull(1) == clockCamera
+                    drawQuad(
+                        if (fromCourt) courtTexture else if (fromScoreboard) scoreboardTexture else clockTexture,
+                        if (fromCourt) courtMatrix else if (fromScoreboard) scoreboardMatrix else clockMatrix,
+                        clockMap,
+                        clockDestination.left * 2f - 1f, 1f - clockDestination.top * 2f,
+                        clockDestination.right * 2f - 1f, 1f - clockDestination.bottom * 2f,
+                    )
+                }
 
                 GLES20.glDisableVertexAttribArray(unitHandle)
                 target.presentationOriginNanos?.let { origin ->

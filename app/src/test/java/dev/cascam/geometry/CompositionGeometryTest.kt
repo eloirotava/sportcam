@@ -3,6 +3,9 @@ package dev.cascam.geometry
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.CaptureProfile
 import dev.cascam.config.OverlayLayer
+import dev.cascam.camera.CameraCapabilities
+import dev.cascam.camera.CameraInfo
+import dev.cascam.camera.LensFacing
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -77,5 +80,38 @@ class CompositionGeometryTest {
             CaptureProfile(1280, 720, 30),
             BroadcastConfiguration(captureWidth = 1280, captureHeight = 720, captureFps = 30).requestedCaptureProfile,
         )
+    }
+
+    @Test fun `three distinct enabled layers request three cameras`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "wide",
+            scoreboardCameraId = "tele",
+            scoreboardEnabled = true,
+            clockCameraId = "front",
+            clockEnabled = true,
+        )
+
+        assertEquals(linkedSetOf("wide", "tele", "front"), configuration.requiredCameraIds())
+    }
+
+    @Test fun `capture profile has a readable label`() {
+        assertEquals("1920×1080 · 30 fps", CaptureProfile(1920, 1080, 30).label)
+    }
+
+    @Test fun `simultaneous support follows logical camera groups`() {
+        val cameras = listOf(
+            CameraInfo("0/wide", "0", "wide", 1f, LensFacing.BACK),
+            CameraInfo("0/tele", "0", "tele", 3f, LensFacing.BACK),
+            CameraInfo("1", "1", null, 2f, LensFacing.FRONT),
+            CameraInfo("2", "2", null, 2f, LensFacing.EXTERNAL),
+        )
+        val capabilities = CameraCapabilities(cameras, setOf(setOf("0", "1")))
+
+        assertEquals(true, capabilities.supportsSimultaneous(setOf("0/wide", "0/tele")))
+        assertEquals(true, capabilities.supportsSimultaneous(setOf("0/wide", "1")))
+        assertEquals(false, capabilities.supportsSimultaneous(setOf("0/wide", "2")))
+
+        val triple = CameraCapabilities(cameras, setOf(setOf("0", "1", "2")))
+        assertEquals(true, triple.supportsSimultaneous(setOf("0/wide", "1", "2")))
     }
 }

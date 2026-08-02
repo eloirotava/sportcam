@@ -18,11 +18,18 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var courtFrame: Bitmap? = null
     private var scoreboardFrame: Bitmap? = null
+    private var clockFrame: Bitmap? = null
     @Volatile private var configuration = BroadcastConfiguration()
+    @Volatile private var exportIntervalNanos = 1_000_000_000L / YoutubePublisher.FPS
     var onComposedFrame: ((Bitmap) -> Unit)? = null
     private var lastExportNanos = 0L
 
-    fun configure(value: BroadcastConfiguration) { configuration = value; invalidate() }
+    fun configure(value: BroadcastConfiguration) {
+        configuration = value
+        val fps = value.captureFps.takeIf { it > 0 } ?: YoutubePublisher.FPS
+        exportIntervalNanos = 1_000_000_000L / fps
+        invalidate()
+    }
     fun submitCourt(bitmap: Bitmap) = post {
         val previous = courtFrame
         courtFrame = bitmap
@@ -37,6 +44,13 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         exportFrameIfNeeded()
         invalidate()
     }
+    fun submitClock(bitmap: Bitmap) = post {
+        val previous = clockFrame
+        clockFrame = bitmap
+        previous?.recycle()
+        exportFrameIfNeeded()
+        invalidate()
+    }
 
     override fun onDraw(canvas: Canvas) {
         render(canvas, width, height)
@@ -44,7 +58,7 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
 
     private fun exportFrameIfNeeded() {
         val now = System.nanoTime()
-        if (onComposedFrame != null && now - lastExportNanos >= EXPORT_INTERVAL_NANOS) {
+        if (onComposedFrame != null && now - lastExportNanos >= exportIntervalNanos) {
             lastExportNanos = now
             val output = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
             render(Canvas(output), output.width, output.height)
@@ -52,16 +66,16 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         }
     }
 
-    private companion object {
-        /** Casado com a taxa de captura: exportar mais devagar converteria quadros para o lixo. */
-        const val EXPORT_INTERVAL_NANOS = 1_000_000_000L / YoutubePublisher.FPS
-    }
-
     private fun render(canvas: Canvas, outputWidth: Int, outputHeight: Int) {
         canvas.drawColor(Color.BLACK)
         val config = configuration
         courtFrame?.let { drawCourt(canvas, it, config, outputWidth, outputHeight) }
-        scoreboardFrame?.let { drawScoreboard(canvas, it, config, outputWidth, outputHeight) }
+        if (config.scoreboardEnabled) scoreboardFrame?.let {
+            drawOverlay(canvas, it, config.scoreboardCorners, config.scoreboardDestination, outputWidth, outputHeight)
+        }
+        if (config.clockEnabled) clockFrame?.let {
+            drawOverlay(canvas, it, config.clockCorners, config.clockDestination, outputWidth, outputHeight)
+        }
     }
 
     private fun drawCourt(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration, outputWidth: Int, outputHeight: Int) {
@@ -73,10 +87,16 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         canvas.drawBitmap(bitmap, source, Rect(0, 0, outputWidth, outputHeight), paint)
     }
 
-    private fun drawScoreboard(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration, outputWidth: Int, outputHeight: Int) {
-        val configured = config.scoreboardDestination
+    private fun drawOverlay(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        corners: List<dev.cascam.geometry.NormalizedPoint>,
+        configured: NormalizedRect,
+        outputWidth: Int,
+        outputHeight: Int,
+    ) {
         val destination = RectF(configured.left * outputWidth, configured.top * outputHeight, configured.right * outputWidth, configured.bottom * outputHeight)
-        val sourcePoints = config.scoreboardCorners.flatMap { listOf(it.x * bitmap.width, it.y * bitmap.height) }.toFloatArray()
+        val sourcePoints = corners.flatMap { listOf(it.x * bitmap.width, it.y * bitmap.height) }.toFloatArray()
         val destinationPoints = floatArrayOf(
             destination.left, destination.top, destination.right, destination.top,
             destination.right, destination.bottom, destination.left, destination.bottom,

@@ -2,9 +2,11 @@ package dev.cascam.camera
 
 import android.content.Context
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
+import android.util.Range
 import kotlin.math.atan
 import kotlin.math.max
 
@@ -38,6 +40,8 @@ data class CameraInfo(
     /** Chaves que o request aceita sobrescrever por sensor, sem o prefixo `android.`. */
     val physicalRequestKeys: List<String> = emptyList(),
     val zoomRatioRange: String? = null,
+    val yuvSizes: List<Size> = emptyList(),
+    val fpsRanges: List<Range<Int>> = emptyList(),
 ) {
     /**
      * Exposição por sensor. Placar de LED estoura quando a medição é feita pela quadra escura, e
@@ -88,6 +92,14 @@ data class CameraCapabilities(
 
     fun camera(id: String): CameraInfo? = cameras.firstOrNull { it.id == id }
 
+    /** Uma câmera lógica pode alimentar vários sensores; lógicas distintas precisam de grupo anunciado. */
+    fun supportsSimultaneous(cameraIds: Set<String>): Boolean {
+        val selected = cameraIds.mapNotNull(::camera)
+        if (selected.size != cameraIds.size) return false
+        val logicalIds = selected.map { it.logicalCameraId }.toSet()
+        return logicalIds.size <= 1 || concurrentPairs.any { it.containsAll(logicalIds) }
+    }
+
     /** Sensores físicos agrupados pela câmera lógica que os expõe. */
     fun physicalSensorsByLogical(): Map<String, List<CameraInfo>> = cameras
         .filter { it.isPhysical }
@@ -114,15 +126,19 @@ object CameraCapabilitiesReader {
                 characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                 facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), level, multiCamera,
                 perPhysicalZoom(physicalKeys), physicalKeys, zoomRatioRange(characteristics),
+                yuvSizes(characteristics), fpsRanges(characteristics),
             )
             val physical = characteristics.physicalCameraIds.map { physicalId ->
                 val physicalCharacteristics = manager.getCameraCharacteristics(physicalId)
+                val physicalSizes = yuvSizes(physicalCharacteristics).ifEmpty { yuvSizes(characteristics) }
+                val physicalFps = fpsRanges(physicalCharacteristics).ifEmpty { fpsRanges(characteristics) }
                 CameraInfo(
                     "$id/$physicalId", id, physicalId,
                     physicalCharacteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                     facing, horizontalFieldOfView(physicalCharacteristics), maximumYuvSize(physicalCharacteristics),
                     hardwareLevel(physicalCharacteristics), false,
                     PerPhysicalZoom.NONE, emptyList(), zoomRatioRange(physicalCharacteristics),
+                    physicalSizes, physicalFps,
                 )
             }
             listOf(logical) + physical
@@ -168,6 +184,19 @@ object CameraCapabilitiesReader {
         .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         ?.getOutputSizes(ImageFormat.YUV_420_888)
         ?.maxByOrNull { it.width.toLong() * it.height }
+
+    private fun yuvSizes(characteristics: CameraCharacteristics): List<Size> {
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return emptyList()
+        val yuv = map.getOutputSizes(ImageFormat.YUV_420_888)?.toSet().orEmpty()
+        val gpu = map.getOutputSizes(SurfaceTexture::class.java)?.toSet().orEmpty()
+        return (if (gpu.isEmpty()) yuv else yuv intersect gpu)
+            .sortedByDescending { it.width.toLong() * it.height }
+    }
+
+    private fun fpsRanges(characteristics: CameraCharacteristics): List<Range<Int>> = characteristics
+        .get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        ?.sortedWith(compareByDescending<Range<Int>> { it.upper }.thenByDescending { it.lower })
+        .orEmpty()
 
     private fun horizontalFieldOfView(characteristics: CameraCharacteristics): Float? {
         val focal = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: return null
