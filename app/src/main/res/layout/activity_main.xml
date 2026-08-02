@@ -135,7 +135,7 @@
 
                 <LinearLayout android:id="@+id/panel_diagnostics" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Teste de duas câmeras" />
-                    <TextView style="@style/PanelText" android:text="Liga de verdade cada par possível, confere se os dois fluxos entregam imagens diferentes e desce a resolução até achar a maior que o aparelho aguenta. Aponte as câmeras para cenas distintas antes de começar e deixe a tela ligada." />
+                    <TextView style="@style/PanelText" android:text="Liga de verdade cada par possível, confere se os dois fluxos são diferentes e desce a resolução até achar a maior aceita. Nos pares físicos, mantém a lente aberta da quadra sem zoom e tenta o zoom máximo somente na lente fechada de placar/cronômetro. Apoie o celular, aponte para uma cena iluminada com detalhes e deixe a tela ligada." />
                     <Button android:id="@+id/run_probe" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="▶ TESTAR PARES DE CÂMERA" />
                     <TextView android:id="@+id/probe_status" style="@style/PanelHint" android:text="Nenhum teste executado ainda." />
                     <Button android:id="@+id/copy_probe_report" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="COPIAR RELATÓRIO" android:enabled="false" />

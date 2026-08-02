@@ -57,7 +57,12 @@ class DualCameraProbe(
             }
     }
 
-    private data class Attempt(val size: Size, val approved: Boolean, val detail: String)
+    private data class Attempt(
+        val size: Size,
+        val approved: Boolean,
+        val detail: String,
+        val physicalZoom: Camera2DualStreamProbe.PhysicalZoomResult? = null,
+    )
 
     private data class Finding(val candidate: Candidate, val attempts: MutableList<Attempt> = mutableListOf()) {
         val best: Attempt? get() = attempts.firstOrNull { it.approved }
@@ -215,7 +220,7 @@ class DualCameraProbe(
         ) { result ->
             handler.post {
                 if (token != attemptToken || !isRunning) return@post
-                record(candidate, size, result.approved, result.detail)
+                record(candidate, size, result.approved, result.detail, result.physicalZoom)
                 advance()
             }
         }
@@ -310,9 +315,15 @@ class DualCameraProbe(
         advance()
     }
 
-    private fun record(candidate: Candidate, size: Size, approved: Boolean, detail: String) {
+    private fun record(
+        candidate: Candidate,
+        size: Size,
+        approved: Boolean,
+        detail: String,
+        physicalZoom: Camera2DualStreamProbe.PhysicalZoomResult? = null,
+    ) {
         val finding = findings.firstOrNull { it.candidate == candidate } ?: Finding(candidate).also { findings += it }
-        finding.attempts += Attempt(size, approved, detail)
+        finding.attempts += Attempt(size, approved, detail, physicalZoom)
     }
 
     @ExperimentalCamera2Interop
@@ -392,6 +403,11 @@ class DualCameraProbe(
             appendLine("       ${finding.candidate.second.describe}")
             finding.attempts.forEach { attempt ->
                 appendLine("       ${if (attempt.approved) "✓" else "✗"} ${attempt.size.width}x${attempt.size.height}: ${attempt.detail}")
+                attempt.physicalZoom?.let { zoom ->
+                    val mark = if (zoom.applied) "✓" else "✗"
+                    val factor = zoom.factor?.let { " no máximo %.1f×".format(it) }.orEmpty()
+                    appendLine("         $mark ZOOM SÓ NO AUXILIAR$factor (${zoom.method.label}): ${zoom.detail}")
+                }
             }
         }
         if (!finished) appendLine("  (varredura interrompida antes do fim)")
@@ -422,6 +438,15 @@ class DualCameraProbe(
                 if (winner.candidate.kind == Kind.PHYSICAL_PAIR) {
                     appendLine("  O par passou pela via Camera2 com os dois streams no mesmo tamanho; a captura da")
                     appendLine("  transmissão segue esse formato, e não o caminho do CameraX.")
+                    val zoom = best.physicalZoom
+                    when {
+                        zoom?.applied == true -> {
+                            appendLine("  Zoom independente confirmado no sensor de PLACAR/CRONÔMETRO${zoom.factor?.let { " até %.1f×".format(it) }.orEmpty()}.")
+                            appendLine("  A QUADRA ficou sem pedido de zoom durante o teste.")
+                        }
+                        zoom?.supported == true -> appendLine("  O HAL aceitou/declarou zoom independente, mas a mudança visual não foi confirmada; repita com o celular e a cena parados.")
+                        else -> appendLine("  Zoom independente de PLACAR/CRONÔMETRO não foi confirmado neste par.")
+                    }
                     appendLine()
                     appendLine("  ONDE APONTAR O TRIPÉ")
                     val gap = ratioBetween(court, scoreboard)

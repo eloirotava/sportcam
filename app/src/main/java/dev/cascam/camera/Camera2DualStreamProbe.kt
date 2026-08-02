@@ -1,6 +1,7 @@
 package dev.cascam.camera
 
 import android.annotation.SuppressLint
+import android.graphics.Rect
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
@@ -13,6 +14,7 @@ import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.Image
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
@@ -37,6 +39,15 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
         val detail: String,
         val distance: Int? = null,
         val comparisons: Int = 0,
+        val physicalZoom: PhysicalZoomResult? = null,
+    )
+
+    data class PhysicalZoomResult(
+        val supported: Boolean,
+        val applied: Boolean,
+        val factor: Float? = null,
+        val method: PerPhysicalZoom = PerPhysicalZoom.NONE,
+        val detail: String,
     )
 
     private val thread = HandlerThread("cascam-camera2-probe").also { it.start() }
@@ -90,6 +101,9 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
         private var startedAt = 0L
         private var settled = false
         private var finished = false
+        private var baselineResult: Result? = null
+        private var baselineA: LumaSignature? = null
+        private var baselineB: LumaSignature? = null
 
         @SuppressLint("MissingPermission")
         fun start() {
@@ -155,7 +169,7 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
                 configured.setRepeatingRequest(request, null, handler)
                 startedAt = System.currentTimeMillis()
                 handler.postDelayed({ settled = true }, WARMUP_MS)
-                handler.postDelayed({ evaluate() }, WARMUP_MS + observationMs)
+                handler.postDelayed({ evaluateStreams(camera, configured) }, WARMUP_MS + observationMs)
             } catch (error: CameraAccessException) {
                 finish(Result(false, "setRepeatingRequest falhou: ${error.message}"))
             } catch (error: IllegalStateException) {
@@ -183,20 +197,109 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
             }
         }
 
-        private fun evaluate() {
+        private fun evaluateStreams(camera: CameraDevice, configured: CameraCaptureSession) {
             val detail = "${collectorA.describe(physicalA, startedAt)}; ${collectorB.describe(physicalB, startedAt)}"
-            when {
+            val result = when {
                 collectorA.frames == 0 || collectorB.frames == 0 ->
-                    finish(Result(false, "$detail — um dos sensores não entregou quadro nenhum"))
+                    Result(false, "$detail — um dos sensores não entregou quadro nenhum")
                 distances.isEmpty() ->
-                    finish(Result(false, "$detail — só chegaram quadros sem contraste; aponte as câmeras para cenas iluminadas e diferentes e repita", comparisons = 0))
+                    Result(false, "$detail — só chegaram quadros sem contraste; aponte as câmeras para cenas iluminadas e diferentes e repita", comparisons = 0)
                 else -> {
                     val median = distances.sorted()[distances.size / 2]
                     val approved = median > DISTINCT_DISTANCE
                     val verdict = if (approved) "imagens distintas" else "mesma imagem nos dois fluxos"
-                    finish(Result(approved, "$detail — $verdict (distância mediana $median em ${distances.size} comparações)", median, distances.size))
+                    Result(approved, "$detail — $verdict (distância mediana $median em ${distances.size} comparações)", median, distances.size)
                 }
             }
+            if (!result.approved) {
+                finish(result)
+                return
+            }
+            baselineResult = result
+            baselineA = collectorA.last
+            baselineB = collectorB.last
+            runCatching { startPhysicalZoomTest(camera, configured) }
+                .onFailure {
+                    finishWithZoom(PhysicalZoomResult(true, false, detail = "falha ao preparar teste físico: ${it.message}"))
+                }
+        }
+
+        /**
+         * Mantém A (a lente mais aberta/quadra) sem alteração e pede o zoom máximo somente em B
+         * (a lente mais fechada, candidata a placar/cronômetro). Além de a requisição ser aceita,
+         * confirma que os dois streams continuam entregando quadros após a mudança.
+         */
+        private fun startPhysicalZoomTest(camera: CameraDevice, configured: CameraCaptureSession) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                finishWithZoom(PhysicalZoomResult(false, false, detail = "Android anterior à API 28"))
+                return
+            }
+            val logical = manager.getCameraCharacteristics(logicalId)
+            val keys = runCatching { logical.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
+            val physical = manager.getCameraCharacteristics(physicalB)
+            val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(readerA.surface)
+                addTarget(readerB.surface)
+                set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            }
+            val zoom = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && keys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
+                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    val factor = range?.upper
+                    if (factor == null || factor <= 1f) null else {
+                        builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, factor, physicalB)
+                        PhysicalZoomResult(true, false, factor, PerPhysicalZoom.ZOOM_RATIO, "requisição preparada")
+                    }
+                }
+                keys.contains(CaptureRequest.SCALER_CROP_REGION) -> {
+                    val active = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                    val factor = physical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+                        ?: logical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+                    if (active == null || factor == null || factor <= 1f) null else {
+                        builder.setPhysicalCameraKey(CaptureRequest.SCALER_CROP_REGION, centeredCrop(active, factor), physicalB)
+                        PhysicalZoomResult(true, false, factor, PerPhysicalZoom.CROP_REGION, "requisição preparada")
+                    }
+                }
+                else -> null
+            }
+            if (zoom == null) {
+                finishWithZoom(PhysicalZoomResult(false, false, detail = "o HAL não declarou zoom/crop por sensor físico"))
+                return
+            }
+            collectorA.reset(); collectorB.reset(); distances.clear()
+            settled = false
+            runCatching { configured.setRepeatingRequest(builder.build(), null, handler) }
+                .onFailure {
+                    finishWithZoom(zoom.copy(detail = "o HAL recusou ${zoom.method.label}: ${it.message}"))
+                    return
+                }
+            startedAt = System.currentTimeMillis()
+            handler.postDelayed({ settled = true }, ZOOM_WARMUP_MS)
+            handler.postDelayed({ evaluatePhysicalZoom(zoom) }, ZOOM_WARMUP_MS + ZOOM_OBSERVATION_MS)
+        }
+
+        private fun evaluatePhysicalZoom(requested: PhysicalZoomResult) {
+            val a = collectorA.last
+            val b = collectorB.last
+            if (collectorA.frames == 0 || collectorB.frames == 0 || a == null || b == null) {
+                finishWithZoom(requested.copy(detail = "requisição aceita, mas um stream parou de entregar quadros"))
+                return
+            }
+            val courtChange = baselineA?.distanceTo(a)
+            val auxiliaryChange = baselineB?.distanceTo(b)
+            val visuallyConfirmed = courtChange != null && auxiliaryChange != null &&
+                auxiliaryChange >= ZOOM_CHANGE_DISTANCE && auxiliaryChange > courtChange
+            val evidence = if (courtChange != null && auxiliaryChange != null) {
+                "quadra mudou $courtChange; auxiliar mudou $auxiliaryChange (a cena deve ficar parada para esta comparação)"
+            } else "os dois streams continuaram ativos"
+            val verdict = if (visuallyConfirmed) "aceito e mudança visual confirmada" else "aceito, mas mudança visual não confirmada"
+            finishWithZoom(requested.copy(applied = visuallyConfirmed, detail = "$verdict; $evidence"))
+        }
+
+        private fun finishWithZoom(zoom: PhysicalZoomResult) {
+            val base = baselineResult ?: Result(false, "teste-base ausente")
+            finish(base.copy(physicalZoom = zoom))
         }
 
         private fun finish(result: Result) {
@@ -227,6 +330,8 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
             frames++
         }
 
+        fun reset() { frames = 0; last = null; width = 0; height = 0 }
+
         fun describe(physicalId: String, startedAt: Long): String {
             if (frames == 0) return "$physicalId sem quadros"
             val seconds = (System.currentTimeMillis() - startedAt).coerceAtLeast(1) / 1_000f
@@ -235,9 +340,21 @@ class Camera2DualStreamProbe(private val manager: CameraManager) {
     }
 
     companion object {
-        private const val OPEN_TIMEOUT_MS = 8_000L
+        // Inclui abertura, teste-base e a segunda fase com zoom físico.
+        private const val OPEN_TIMEOUT_MS = 12_000L
         private const val WARMUP_MS = 1_200L
+        private const val ZOOM_WARMUP_MS = 800L
+        private const val ZOOM_OBSERVATION_MS = 1_200L
         private const val DISTINCT_DISTANCE = 6
+        private const val ZOOM_CHANGE_DISTANCE = 6
+
+        private fun centeredCrop(active: Rect, zoom: Float): Rect {
+            val width = (active.width() / zoom).toInt().coerceAtLeast(2) and -2
+            val height = (active.height() / zoom).toInt().coerceAtLeast(2) and -2
+            val left = active.left + (active.width() - width) / 2
+            val top = active.top + (active.height() - height) / 2
+            return Rect(left, top, left + width, top + height)
+        }
 
         private fun deviceError(code: Int) = when (code) {
             CameraDevice.StateCallback.ERROR_CAMERA_IN_USE -> "câmera já em uso"
