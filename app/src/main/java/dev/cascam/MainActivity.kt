@@ -191,7 +191,10 @@ class MainActivity : AppCompatActivity() {
         binding.checkLive.setOnClickListener { checkLiveHealth() }
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
-        binding.compositionOverlay.onCropChanged = { _, _, _ -> updateZoomLabels() }
+        binding.compositionOverlay.onCropChanged = { _, _, _ ->
+            updateZoomLabels()
+            applyCompositionConfiguration()
+        }
         binding.compositionOverlay.onPanRequested = { dx, dy -> panScoreboardView(dx, dy) }
 
         binding.scoreboardViewZoom.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -290,7 +293,18 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun saveConfiguration() = store.save(readForm()).also { compositor?.configure(readForm()) }
+    private fun applyCompositionConfiguration() {
+        val configuration = readForm()
+        binding.composedOutput.configure(configuration)
+        compositor?.configure(configuration)
+    }
+
+    private fun saveConfiguration() {
+        val configuration = readForm()
+        store.save(configuration)
+        binding.composedOutput.configure(configuration)
+        compositor?.configure(configuration)
+    }
 
     private fun authorizeYoutube() {
         val clientId = binding.youtubeClientId.text.toString().trim()

@@ -141,7 +141,10 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
 
     private fun render() {
         if (!ready) return
-        val anchor = targets.firstOrNull()?.eglSurface ?: offscreen ?: return
+        // A SurfaceView da prévia desaparece quando a tela apaga. Manter o contexto ancorado nela
+        // criava uma corrida com surfaceDestroyed(): um quadro podia tentar usar a EGLSurface já
+        // inválida e matar a thread GL, inclusive o destino independente do encoder.
+        val anchor = offscreen ?: return
         egl.makeCurrent(anchor)
         if (courtPending) {
             courtPending = false
@@ -172,31 +175,40 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val scoreboardMap = Homography.multiply(rotation, Homography.unitSquareTo(config.scoreboardCorners))
         val destination = config.scoreboardDestination
 
-        targets.forEach { target ->
-            egl.makeCurrent(target.eglSurface)
-            GLES20.glViewport(0, 0, target.width, target.height)
-            GLES20.glClearColor(0f, 0f, 0f, 1f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            GLES20.glUseProgram(program)
-            GLES20.glEnableVertexAttribArray(unitHandle)
-            vertices.position(0)
-            GLES20.glVertexAttribPointer(unitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
+        targets.toList().forEach { target ->
+            runCatching {
+                egl.makeCurrent(target.eglSurface)
+                GLES20.glViewport(0, 0, target.width, target.height)
+                GLES20.glClearColor(0f, 0f, 0f, 1f)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                GLES20.glUseProgram(program)
+                GLES20.glEnableVertexAttribArray(unitHandle)
+                vertices.position(0)
+                GLES20.glVertexAttribPointer(unitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
 
-            drawQuad(courtTexture, courtMatrix, courtMap, -1f, 1f, 1f, -1f)
-            drawQuad(
-                scoreboardTexture, scoreboardMatrix, scoreboardMap,
-                destination.left * 2f - 1f, 1f - destination.top * 2f,
-                destination.right * 2f - 1f, 1f - destination.bottom * 2f,
-            )
+                drawQuad(courtTexture, courtMatrix, courtMap, -1f, 1f, 1f, -1f)
+                drawQuad(
+                    scoreboardTexture, scoreboardMatrix, scoreboardMap,
+                    destination.left * 2f - 1f, 1f - destination.top * 2f,
+                    destination.right * 2f - 1f, 1f - destination.bottom * 2f,
+                )
 
-            GLES20.glDisableVertexAttribArray(unitHandle)
-            target.presentationOriginNanos?.let { origin ->
-                // Vídeo e áudio precisam usar o mesmo relógio. O compositor pode estar ativo desde
-                // que a aba AO VIVO foi aberta, mas o PTS da transmissão começa junto do encoder.
-                val presentationTimeNanos = (System.nanoTime() - origin).coerceAtLeast(0L)
-                egl.setPresentationTime(target.eglSurface, presentationTimeNanos)
+                GLES20.glDisableVertexAttribArray(unitHandle)
+                target.presentationOriginNanos?.let { origin ->
+                    // Vídeo e áudio precisam usar o mesmo relógio. O compositor pode estar ativo desde
+                    // que a aba AO VIVO foi aberta, mas o PTS da transmissão começa junto do encoder.
+                    val presentationTimeNanos = (System.nanoTime() - origin).coerceAtLeast(0L)
+                    egl.setPresentationTime(target.eglSurface, presentationTimeNanos)
+                }
+                check(egl.swapBuffers(target.eglSurface)) { "eglSwapBuffers falhou" }
+            }.onFailure { error ->
+                // Perder a superfície da tela não pode interromper a superfície do MediaCodec.
+                runCatching { egl.releaseSurface(target.eglSurface) }
+                targets -= target
+                if (target.presentationOriginNanos != null) {
+                    onStatus("Falha no destino GPU do encoder: ${error.message}")
+                }
             }
-            egl.swapBuffers(target.eglSurface)
         }
     }
 
