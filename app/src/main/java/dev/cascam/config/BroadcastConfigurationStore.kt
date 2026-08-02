@@ -10,11 +10,19 @@ class BroadcastConfigurationStore(context: Context) {
     fun load(): BroadcastConfiguration = BroadcastConfiguration(
         courtCameraId = preferences.getString("court_camera", "").orEmpty(),
         scoreboardCameraId = preferences.getString("scoreboard_camera", "").orEmpty(),
+        scoreboardEnabled = preferences.getBoolean("scoreboard_enabled", true),
         cropZoom = preferences.getFloat("crop_zoom", 1f),
         cropPanX = preferences.getFloat("crop_pan_x", 0f),
         cropPanY = preferences.getFloat("crop_pan_y", 0f),
         scoreboardCorners = decodeCorners(preferences.getString("scoreboard_corners", null)),
         scoreboardDestination = decodeRect(preferences.getString("scoreboard_destination", null)),
+        clockCameraId = preferences.getString("clock_camera", "").orEmpty(),
+        clockEnabled = preferences.getBoolean("clock_enabled", false),
+        clockCorners = decodeCorners(preferences.getString("clock_corners", null), DEFAULT_CLOCK_CORNERS),
+        clockDestination = decodeRect(preferences.getString("clock_destination", null), DEFAULT_CLOCK_DESTINATION),
+        captureWidth = preferences.getInt("capture_width", 0).coerceAtLeast(0),
+        captureHeight = preferences.getInt("capture_height", 0).coerceAtLeast(0),
+        captureFps = preferences.getInt("capture_fps", 0).coerceAtLeast(0),
         protocol = runCatching {
             BroadcastProtocol.valueOf(preferences.getString("broadcast_protocol", null).orEmpty())
         }.getOrDefault(BroadcastProtocol.RTMPS),
@@ -48,11 +56,19 @@ class BroadcastConfigurationStore(context: Context) {
         preferences.edit()
             .putString("court_camera", configuration.courtCameraId)
             .putString("scoreboard_camera", configuration.scoreboardCameraId)
+            .putBoolean("scoreboard_enabled", configuration.scoreboardEnabled)
             .putFloat("crop_zoom", configuration.cropZoom)
             .putFloat("crop_pan_x", configuration.cropPanX)
             .putFloat("crop_pan_y", configuration.cropPanY)
             .putString("scoreboard_corners", configuration.scoreboardCorners.joinToString(";") { "${it.x},${it.y}" })
             .putString("scoreboard_destination", with(configuration.scoreboardDestination) { "$left,$top,$right,$bottom" })
+            .putString("clock_camera", configuration.clockCameraId)
+            .putBoolean("clock_enabled", configuration.clockEnabled)
+            .putString("clock_corners", configuration.clockCorners.joinToString(";") { "${it.x},${it.y}" })
+            .putString("clock_destination", with(configuration.clockDestination) { "$left,$top,$right,$bottom" })
+            .putInt("capture_width", configuration.captureWidth)
+            .putInt("capture_height", configuration.captureHeight)
+            .putInt("capture_fps", configuration.captureFps)
             .putString("broadcast_protocol", configuration.protocol.name)
             .putString("video_codec", configuration.videoCodec.name)
             .putString("bitrate_preset", configuration.bitratePreset.name)
@@ -68,16 +84,22 @@ class BroadcastConfigurationStore(context: Context) {
             .apply()
     }
 
-    private fun decodeCorners(value: String?): List<NormalizedPoint> = runCatching {
+    private fun decodeCorners(
+        value: String?,
+        fallback: List<NormalizedPoint> = DEFAULT_SCOREBOARD_CORNERS,
+    ): List<NormalizedPoint> = runCatching {
         value.orEmpty().split(';').map { encoded ->
             val coordinates = encoded.split(',')
             NormalizedPoint(coordinates[0].toFloat(), coordinates[1].toFloat())
         }.also { require(it.size == 4) }
-    }.getOrDefault(DEFAULT_SCOREBOARD_CORNERS)
+    }.getOrDefault(fallback)
 
-    private fun decodeRect(value: String?): NormalizedRect = runCatching {
+    private fun decodeRect(
+        value: String?,
+        fallback: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
+    ): NormalizedRect = runCatching {
         val coordinates = value.orEmpty().split(',').map(String::toFloat)
         require(coordinates.size == 4)
         NormalizedRect(coordinates[0], coordinates[1], coordinates[2], coordinates[3])
-    }.getOrDefault(DEFAULT_SCOREBOARD_DESTINATION)
+    }.getOrDefault(fallback)
 }

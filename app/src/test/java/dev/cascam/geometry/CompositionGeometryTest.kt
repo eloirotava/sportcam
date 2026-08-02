@@ -1,5 +1,8 @@
 package dev.cascam.geometry
 
+import dev.cascam.config.BroadcastConfiguration
+import dev.cascam.config.CaptureProfile
+import dev.cascam.config.OverlayLayer
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -35,5 +38,44 @@ class CompositionGeometryTest {
         assertEquals(16f / 9f, crop.width * 2400f / (crop.height * 1080f), .0001f)
         assertEquals(1f, crop.right, .0001f)
         assertEquals(0f, crop.top, .0001f)
+    }
+
+    @Test fun `shared overlay sources open a camera only once`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "wide",
+            scoreboardCameraId = "tele",
+            scoreboardEnabled = true,
+            clockCameraId = "tele",
+            clockEnabled = true,
+        )
+
+        assertEquals(linkedSetOf("wide", "tele"), configuration.requiredCameraIds())
+    }
+
+    @Test fun `disabled overlays do not request their cameras`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "wide",
+            scoreboardCameraId = "tele",
+            scoreboardEnabled = false,
+            clockCameraId = "front",
+            clockEnabled = false,
+        )
+
+        assertEquals(setOf("wide"), configuration.requiredCameraIds())
+    }
+
+    @Test fun `blank overlay source reuses court camera`() {
+        val configuration = BroadcastConfiguration(courtCameraId = "wide", clockEnabled = true)
+
+        assertEquals("wide", configuration.cameraIdFor(OverlayLayer.CLOCK))
+        assertEquals(setOf("wide"), configuration.requiredCameraIds())
+    }
+
+    @Test fun `capture profile stays automatic until all values are selected`() {
+        assertEquals(null, BroadcastConfiguration(captureWidth = 1280, captureHeight = 720).requestedCaptureProfile)
+        assertEquals(
+            CaptureProfile(1280, 720, 30),
+            BroadcastConfiguration(captureWidth = 1280, captureHeight = 720, captureFps = 30).requestedCaptureProfile,
+        )
     }
 }

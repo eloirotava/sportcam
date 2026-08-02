@@ -6,11 +6,20 @@ import dev.cascam.geometry.NormalizedRect
 data class BroadcastConfiguration(
     val courtCameraId: String = "",
     val scoreboardCameraId: String = "",
+    val scoreboardEnabled: Boolean = true,
     val cropZoom: Float = 1f,
     val cropPanX: Float = 0f,
     val cropPanY: Float = 0f,
     val scoreboardCorners: List<NormalizedPoint> = DEFAULT_SCOREBOARD_CORNERS,
     val scoreboardDestination: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
+    val clockCameraId: String = "",
+    val clockEnabled: Boolean = false,
+    val clockCorners: List<NormalizedPoint> = DEFAULT_CLOCK_CORNERS,
+    val clockDestination: NormalizedRect = DEFAULT_CLOCK_DESTINATION,
+    /** Zero mantém a escolha automática até o diagnóstico fornecer perfis aprovados. */
+    val captureWidth: Int = 0,
+    val captureHeight: Int = 0,
+    val captureFps: Int = 0,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val videoCodec: VideoCodec = VideoCodec.H264,
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
@@ -23,7 +32,36 @@ data class BroadcastConfiguration(
     val liveLatency: LiveLatency = LiveLatency.LOW,
     val compositionEngine: CompositionEngine = CompositionEngine.CPU,
     val frameRotation: FrameRotation = FrameRotation.AUTO,
-)
+) {
+    /** Câmeras distintas necessárias; camadas podem compartilhar a mesma fonte. */
+    fun requiredCameraIds(): Set<String> = buildSet {
+        courtCameraId.takeIf(String::isNotBlank)?.let(::add)
+        if (scoreboardEnabled) add(scoreboardCameraId.ifBlank { courtCameraId })
+        if (clockEnabled) add(clockCameraId.ifBlank { courtCameraId })
+    }.filterTo(linkedSetOf(), String::isNotBlank)
+
+    fun cameraIdFor(layer: OverlayLayer): String = when (layer) {
+        OverlayLayer.SCOREBOARD -> scoreboardCameraId
+        OverlayLayer.CLOCK -> clockCameraId
+    }.ifBlank { courtCameraId }
+
+    val requestedCaptureProfile: CaptureProfile?
+        get() = if (captureWidth > 0 && captureHeight > 0 && captureFps > 0) {
+            CaptureProfile(captureWidth, captureHeight, captureFps)
+        } else null
+}
+
+data class CaptureProfile(val width: Int, val height: Int, val fps: Int) {
+    init {
+        require(width > 0 && height > 0 && fps > 0)
+    }
+
+    val label: String get() = "${width}×$height · $fps fps"
+}
+
+enum class OverlayLayer(val label: String) {
+    SCOREBOARD("Placar"), CLOCK("Cronômetro"),
+}
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
 
@@ -77,10 +115,18 @@ enum class LiveLatency(val label: String, val apiValue: String, val allowsDvr: B
 }
 
 val DEFAULT_SCOREBOARD_DESTINATION = NormalizedRect(.04f, .05f, .36f, .24f)
+val DEFAULT_CLOCK_DESTINATION = NormalizedRect(.72f, .05f, .96f, .18f)
 
 val DEFAULT_SCOREBOARD_CORNERS = listOf(
     NormalizedPoint(.68f, .08f),
     NormalizedPoint(.93f, .12f),
     NormalizedPoint(.91f, .30f),
     NormalizedPoint(.66f, .27f),
+)
+
+val DEFAULT_CLOCK_CORNERS = listOf(
+    NormalizedPoint(.36f, .08f),
+    NormalizedPoint(.64f, .08f),
+    NormalizedPoint(.64f, .24f),
+    NormalizedPoint(.36f, .24f),
 )
