@@ -15,10 +15,10 @@ class BroadcastService : Service() {
     override fun onCreate() {
         super.onCreate()
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Transmissão CasCam", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Transmissão SportCam", NotificationManager.IMPORTANCE_LOW))
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.presence_video_online)
-            .setContentTitle("CasCam transmitindo")
+            .setContentTitle("SportCam transmitindo")
             .setContentText("Câmeras, encoder e rede continuam ativos com a tela apagada")
             .setOngoing(true)
             .build()

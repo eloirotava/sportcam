@@ -36,7 +36,7 @@ data class BroadcastConfiguration(
     val youtubeStreamKey: String = "",
     val youtubeOAuthClientId: String = "",
     val youtubeOAuthClientSecret: String = "",
-    val liveTitle: String = "CasCam ao vivo",
+    val liveTitle: String = "SportCam ao vivo",
     val livePrivacy: LivePrivacy = LivePrivacy.UNLISTED,
     val liveLatency: LiveLatency = LiveLatency.LOW,
     val compositionEngine: CompositionEngine = CompositionEngine.CPU,

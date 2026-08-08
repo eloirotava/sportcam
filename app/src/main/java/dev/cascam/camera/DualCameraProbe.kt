@@ -355,7 +355,7 @@ class DualCameraProbe(
 
     @ExperimentalCamera2Interop
     private fun report(finished: Boolean): String = buildString {
-        appendLine("CASCAM · DIAGNÓSTICO DE DUAS CÂMERAS")
+        appendLine("SPOCAM · DIAGNÓSTICO DE DUAS CÂMERAS")
         appendLine("${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         appendLine()
 

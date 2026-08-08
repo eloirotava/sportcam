@@ -12,7 +12,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 
-/** Ponte entre o inventário de câmeras do CasCam e os seletores/use cases do CameraX. */
+/** Ponte entre o inventário de câmeras do SportCam e os seletores/use cases do CameraX. */
 object CameraXSupport {
     val DEFAULT_ANALYSIS_SIZE: Size = Size(1280, 720)
 

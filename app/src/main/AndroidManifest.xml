@@ -11,8 +11,8 @@
 
     <application
         android:allowBackup="false"
-        android:label="CasCam"
-        android:theme="@style/Theme.CasCam">
+        android:label="SportCam"
+        android:theme="@style/Theme.SportCam">
         <service android:name=".BroadcastService" android:exported="false" android:foregroundServiceType="camera|microphone" />
         <activity
             android:name=".MainActivity"

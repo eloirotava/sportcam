@@ -444,7 +444,7 @@ class MainActivity : AppCompatActivity() {
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
             youtubeOAuthClientId = binding.youtubeClientId.text.toString().trim(),
             youtubeOAuthClientSecret = binding.youtubeClientSecret.text.toString().trim(),
-            liveTitle = binding.liveTitle.text.toString().trim().ifBlank { "CasCam ao vivo" },
+            liveTitle = binding.liveTitle.text.toString().trim().ifBlank { "SportCam ao vivo" },
             livePrivacy = LivePrivacy.entries[binding.livePrivacy.selectedItemPosition],
             liveLatency = LiveLatency.entries[binding.liveLatency.selectedItemPosition],
             compositionEngine = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition],
@@ -490,7 +490,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }.onFailure { error ->
                 val explanation = if (error is IOException) {
-                    "Sem conexão com o Google (${error.javaClass.simpleName}). Confira se o CasCam pode usar dados em segundo plano: Ajustes › Apps › CasCam › Dados móveis, com Economia de dados desligada ou o app liberado."
+                    "Sem conexão com o Google (${error.javaClass.simpleName}). Confira se o SportCam pode usar dados em segundo plano: Ajustes › Apps › SportCam › Dados móveis, com Economia de dados desligada ou o app liberado."
                 } else {
                     "Falha OAuth: ${error.message}"
                 }
@@ -587,7 +587,7 @@ class MainActivity : AppCompatActivity() {
         if (probeReport.isBlank()) { toast("Rode o teste primeiro"); return }
         val clipboard = getSystemService(ClipboardManager::class.java)
         if (clipboard == null) { toast("Área de transferência indisponível"); return }
-        clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras CasCam", probeReport))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras SportCam", probeReport))
         toast("Relatório copiado")
     }
 

@@ -24,7 +24,7 @@ class RtmpClient(serverUrl: String, private val streamKey: String) : AutoCloseab
         handshake()
         command(3, 0, "connect", 1.0, mapOf(
             "app" to uri.path.trim('/'), "type" to "nonprivate", "tcUrl" to uri.toString(),
-            "flashVer" to "FMLE/3.0 (compatible; CasCam/0.1)", "fpad" to false,
+            "flashVer" to "FMLE/3.0 (compatible; SportCam/0.1)", "fpad" to false,
             "capabilities" to 15.0, "audioCodecs" to 0.0, "videoCodecs" to 252.0,
             "videoFunction" to 1.0, "objectEncoding" to 0.0,
         ))
@@ -53,7 +53,7 @@ class RtmpClient(serverUrl: String, private val streamKey: String) : AutoCloseab
             "framerate" to frameRate.toDouble(), "videodatarate" to videoBitrate / 1_000.0,
             "videocodecid" to 7.0, "audiocodecid" to 10.0,
             "audiosamplerate" to 44_100.0, "audiosamplesize" to 16.0, "stereo" to false,
-            "encoder" to "CasCam Android",
+            "encoder" to "SportCam Android",
         )))
         sendMessage(5, 18, publishedStreamId, payload)
     }

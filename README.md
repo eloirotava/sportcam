@@ -1,4 +1,4 @@
-# CasCam
+# SportCam
 
 Protótipo Android para transformar um Galaxy S22 em uma câmera de transmissão de
 jogos. A composição planejada usa:
@@ -136,7 +136,7 @@ O YouTube também aceita **HLS como protocolo de ingestão**, além de RTMPS. O 
 pode ser escolhido na tela **Ao vivo**. Não se
 trata de servir a playlist pelo celular para espectadores: o encoder deve enviar por
 HTTP a playlist e os segmentos ao endpoint de upload HLS fornecido pelo YouTube
-Studio. A implementação do CasCam:
+Studio. A implementação do SportCam:
 
 1. selecionar **HLS** como protocolo da transmissão no YouTube Studio e copiar a URL
    de ingestão/chave gerada para aquela live;
@@ -173,7 +173,7 @@ OAuth. O app agora implementa esse fluxo administrativo pelo OAuth Device Flow:
 1. no Google Cloud, habilite **YouTube Data API v3**, configure a tela de consentimento
    e adicione sua conta como usuário de teste enquanto o app estiver em testes;
 2. crie um OAuth Client do tipo **TVs and Limited Input devices**;
-3. informe Client ID e Client Secret no CasCam e toque **Autorizar YouTube**;
+3. informe Client ID e Client Secret no SportCam e toque **Autorizar YouTube**;
 4. ao tocar **Autorizar YouTube** o app copia o código do dispositivo para a área de
    transferência e abre a página do Google; basta colar. O código também fica visível
    em fonte grande e selecionável no painel, com os botões **Copiar código** (recopia a
@@ -191,12 +191,12 @@ Dois erros comuns nesse fluxo:
   scope `youtube` é sensível, então enquanto a tela de consentimento estiver em
   *Testing* só contas listadas em **Usuários de teste** conseguem autorizar. Adicione
   a sua conta ali. Verificação só é exigida para distribuir a terceiros.
-- **"Unable to resolve host"** durante a espera pela aprovação — o CasCam fica em
+- **"Unable to resolve host"** durante a espera pela aprovação — o SportCam fica em
   segundo plano enquanto você aprova no navegador, e a Economia de dados, o modo de
   espera de apps ou uma troca de Wi-Fi para dados móveis cortam a rede do processo
   exatamente aí. O app não aborta mais nesse caso: continua tentando até o código
-  expirar de fato. Voltar para o CasCam depois de aprovar resolve na hora; para não
-  depender disso, libere o app em Ajustes › Apps › CasCam › Dados móveis.
+  expirar de fato. Voltar para o SportCam depois de aprovar resolve na hora; para não
+  depender disso, libere o app em Ajustes › Apps › SportCam › Dados móveis.
 
 ### Tela apagada e economia de dados
 
@@ -237,20 +237,21 @@ O APK de debug será criado em `app/build/outputs/apk/debug/app-debug.apk`.
 O repositório mantém apenas código-fonte: não versionamos o Gradle Wrapper JAR, SDK,
 Build Tools nem outros binários. Para o ambiente Ubuntu 22.04 x86_64 exibido por
 `uname -a` no Codespaces, o script fonte abaixo baixa as cópias Linux corretas para
-o diretório do usuário e cria `local.properties` e `.cascam-env`, ambos ignorados
+o diretório do usuário e cria `local.properties` e `.sportcam-env`, ambos ignorados
 pelo Git:
 
 ```bash
 chmod +x scripts/bootstrap-codespaces.sh
 ./scripts/bootstrap-codespaces.sh
-source .cascam-env
+source .sportcam-env
 gradle test
 gradle assembleDebug
 ```
 
-O bootstrap instala JDK 17 pelos pacotes do próprio Ubuntu e baixa Gradle 8.11.1,
+O bootstrap instala JDK 17 pelos pacotes do próprio Ubuntu (ou JDK 21 como fallback
+em distribuições como Debian 13) e baixa Gradle 8.11.1,
 Android Command-line Tools, Platform 35 e Build Tools 35 para o seu Codespace. Nada
-disso é commitado. Em um terminal novo, basta repetir `source .cascam-env` antes de
+disso é commitado. Em um terminal novo, basta repetir `source .sportcam-env` antes de
 compilar. Para baixar o APK, abra a aba **Explorer** do Codespaces, navegue até
 `app/build/outputs/apk/debug/app-debug.apk`, clique com o botão direito e escolha
 **Download**. A primeira compilação precisa de acesso à internet para baixar o SDK,
@@ -263,7 +264,7 @@ qualquer daemon que tenha sido iniciado com Java 25. Confirme antes do build:
 
 ```bash
 ./scripts/bootstrap-codespaces.sh
-source .cascam-env
+source .sportcam-env
 java -version
 gradle --stop
 gradle assembleDebug
@@ -277,16 +278,16 @@ O JDK 25 instalado no Codespaces pode continuar existindo e ser usado por outros
 projetos. Não o usamos neste build porque o Gradle 8.11.1/AGP 8.9.1 foi escolhido
 para a toolchain Android do projeto e não consegue rodar no Java 25 — a falha que
 mostra apenas `25.0.2` acontece antes mesmo de compilar o app. O arquivo
-`.cascam-env` coloca `$JAVA_HOME/bin` no início do `PATH`, afetando somente o terminal
+`.sportcam-env` coloca `$JAVA_HOME/bin` no início do `PATH`, afetando somente o terminal
 em que ele for carregado.
 
-Se você já gerou `.cascam-env` com uma versão anterior do bootstrap, apague-o e gere
+Se você já gerou `.sportcam-env` com uma versão anterior do bootstrap, apague-o e gere
 novamente depois de atualizar o código:
 
 ```bash
-rm -f .cascam-env
+rm -f .sportcam-env
 ./scripts/bootstrap-codespaces.sh
-source .cascam-env
+source .sportcam-env
 which java
 java -version
 ```

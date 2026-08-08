@@ -7,6 +7,8 @@ local.properties
 captures/
 # Ferramentas geradas/baixadas localmente não fazem parte do código-fonte.
 .cascam-env
+.spocam-env
+.sportcam-env
 gradlew
 gradlew.bat
 gradle/wrapper/gradle-wrapper.jar

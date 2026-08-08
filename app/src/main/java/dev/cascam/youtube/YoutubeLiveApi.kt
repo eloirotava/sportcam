@@ -91,7 +91,7 @@ class YoutubeLiveApi(context: Context) {
     /**
      * Fica consultando o Google até o usuário aprovar o código.
      *
-     * Falha de rede aqui não é recusa: enquanto o usuário aprova no navegador o CasCam está em
+     * Falha de rede aqui não é recusa: enquanto o usuário aprova no navegador o SportCam está em
      * segundo plano, e é justamente aí que a Economia de dados, o modo de espera de apps ou uma
      * troca de Wi-Fi para dados móveis derrubam o DNS do processo. Antes isso abortava o fluxo
      * inteiro e queimava o código; agora só adia a próxima tentativa até o código expirar de fato.
@@ -110,7 +110,7 @@ class YoutubeLiveApi(context: Context) {
                 postForm("https://oauth2.googleapis.com/token", values, acceptErrors = true)
             } catch (error: IOException) {
                 offlineAttempts++
-                onWaiting("Sem rede para falar com o Google ($offlineAttempts ${if (offlineAttempts == 1) "tentativa" else "tentativas"}). Volte ao CasCam e mantenha o app aberto; o código ${authorization.userCode} continua valendo.")
+                onWaiting("Sem rede para falar com o Google ($offlineAttempts ${if (offlineAttempts == 1) "tentativa" else "tentativas"}). Volte ao SportCam e mantenha o app aberto; o código ${authorization.userCode} continua valendo.")
                 continue
             }
             offlineAttempts = 0
@@ -148,7 +148,7 @@ class YoutubeLiveApi(context: Context) {
         val stream = requestJson(
             "https://www.googleapis.com/youtube/v3/liveStreams?part=snippet,cdn",
             token,
-            JSONObject().put("snippet", JSONObject().put("title", "$title · CasCam"))
+            JSONObject().put("snippet", JSONObject().put("title", "$title · SportCam"))
                 .put("cdn", JSONObject().put("ingestionType", if (protocol == BroadcastProtocol.RTMPS) "rtmp" else "hls")
                     .put("frameRate", "variable").put("resolution", "variable")),
         )

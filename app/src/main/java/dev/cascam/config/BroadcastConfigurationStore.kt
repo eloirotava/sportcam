@@ -46,7 +46,7 @@ class BroadcastConfigurationStore(context: Context) {
         youtubeStreamKey = preferences.getString("youtube_key", "").orEmpty(),
         youtubeOAuthClientId = preferences.getString("youtube_oauth_client_id", "").orEmpty(),
         youtubeOAuthClientSecret = preferences.getString("youtube_oauth_client_secret", "").orEmpty(),
-        liveTitle = preferences.getString("live_title", "CasCam ao vivo").orEmpty(),
+        liveTitle = preferences.getString("live_title", "SportCam ao vivo").orEmpty(),
         livePrivacy = runCatching {
             LivePrivacy.valueOf(preferences.getString("live_privacy", null).orEmpty())
         }.getOrDefault(LivePrivacy.UNLISTED),

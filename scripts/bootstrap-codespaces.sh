@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Instala, fora do Git, as ferramentas necessárias para compilar em um Codespace
-# Ubuntu x86_64. Os números são compatíveis com AGP 8.9.1 e compileSdk 35 usados
+# Linux x86_64. Os números são compatíveis com AGP 8.9.1 e compileSdk 35 usados
 # neste projeto.
 if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
   echo "Este instalador é destinado a Linux x86_64." >&2
@@ -16,7 +16,14 @@ command_tools_url="https://dl.google.com/android/repository/commandlinetools-lin
 gradle_url="https://services.gradle.org/distributions/gradle-8.11.1-bin.zip"
 
 sudo apt-get update
-sudo apt-get install -y openjdk-17-jdk wget unzip
+if apt-cache show openjdk-17-jdk >/dev/null 2>&1; then
+  java_package="openjdk-17-jdk"
+else
+  # Debian 13 (trixie) removeu o JDK 17 dos repositórios padrão. O AGP usado
+  # pelo projeto também roda com JDK 21, então use-o como fallback local.
+  java_package="openjdk-21-jdk"
+fi
+sudo apt-get install -y "$java_package" wget unzip
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
@@ -39,26 +46,29 @@ fi
 # isso escolheria o Java global do Codespace em vez do pacote instalado acima.
 java_home="/usr/lib/jvm/java-17-openjdk-amd64"
 if [[ ! -x "$java_home/bin/java" ]]; then
-  java_binary="$(dpkg -L openjdk-17-jdk-headless | grep '/bin/java$' | head -n 1)"
+  java_home="/usr/lib/jvm/java-21-openjdk-amd64"
+fi
+if [[ ! -x "$java_home/bin/java" ]]; then
+  java_binary="$(dpkg -L "$java_package" | grep '/bin/java$' | head -n 1)"
   java_home="$(dirname "$(dirname "$java_binary")")"
 fi
-if [[ "$($java_home/bin/java -version 2>&1 | head -n 1)" != *'17.'* ]]; then
-  echo "Não foi possível selecionar o JDK 17 em $java_home" >&2
+if [[ "$($java_home/bin/java -version 2>&1 | head -n 1)" != *'17.'* && "$($java_home/bin/java -version 2>&1 | head -n 1)" != *'21.'* ]]; then
+  echo "Não foi possível selecionar um JDK 17 ou 21 em $java_home" >&2
   exit 1
 fi
 export JAVA_HOME="$java_home"
 export ANDROID_HOME="$android_home"
 export PATH="$JAVA_HOME/bin:$gradle_home/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 hash -r
-if [[ "$(java -version 2>&1 | head -n 1)" != *'17.'* ]]; then
-  echo "O comando java ainda não aponta para o JDK 17: $(command -v java)" >&2
+if [[ "$(java -version 2>&1 | head -n 1)" != *'17.'* && "$(java -version 2>&1 | head -n 1)" != *'21.'* ]]; then
+  echo "O comando java ainda não aponta para o JDK 17 ou 21: $(command -v java)" >&2
   exit 1
 fi
 
 yes | sdkmanager --licenses >/dev/null || true
 sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > "$repo_root/local.properties"
-cat > "$repo_root/.cascam-env" <<EOF
+cat > "$repo_root/.sportcam-env" <<EOF
 export JAVA_HOME="$JAVA_HOME"
 export ANDROID_HOME="$ANDROID_HOME"
 export PATH="\$JAVA_HOME/bin:$gradle_home/bin:\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH"
@@ -69,6 +79,6 @@ EOF
 
 echo
 echo "Ferramentas instaladas fora do repositório. Agora execute:"
-echo "  source .cascam-env"
-echo "  java -version  # deve mostrar 17; se mostrar 25, atualize o script no Git"
+echo "  source .sportcam-env"
+echo "  java -version  # deve mostrar 17 (ou 21 em Debian 13)"
 echo "  gradle assembleDebug"
