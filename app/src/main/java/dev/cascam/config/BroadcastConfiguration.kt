@@ -31,6 +31,7 @@ data class BroadcastConfiguration(
     val clockCaptureZoom: Float = 1f,
     val logoUri: String = "",
     val logoEnabled: Boolean = false,
+    val logoWhiteTransparent: Boolean = false,
     /** Largura relativa à saída; a altura preserva a proporção original da imagem. */
     val logoWidth: Float = .18f,
     val logoCenterX: Float = .88f,

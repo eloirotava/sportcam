@@ -34,6 +34,7 @@ class BroadcastConfigurationStore(context: Context) {
         clockCaptureZoom = preferences.getFloat("clock_capture_zoom", 1f).coerceIn(1f, 8f),
         logoUri = preferences.getString("logo_uri", "").orEmpty(),
         logoEnabled = preferences.getBoolean("logo_enabled", false),
+        logoWhiteTransparent = preferences.getBoolean("logo_white_transparent", false),
         logoWidth = preferences.getFloat("logo_width", .18f).coerceIn(.05f, .5f),
         logoCenterX = preferences.getFloat("logo_center_x", .88f).coerceIn(0f, 1f),
         logoCenterY = preferences.getFloat("logo_center_y", .85f).coerceIn(0f, 1f),
@@ -98,6 +99,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putFloat("clock_capture_zoom", configuration.clockCaptureZoom)
             .putString("logo_uri", configuration.logoUri)
             .putBoolean("logo_enabled", configuration.logoEnabled)
+            .putBoolean("logo_white_transparent", configuration.logoWhiteTransparent)
             .putFloat("logo_width", configuration.logoWidth)
             .putFloat("logo_center_x", configuration.logoCenterX)
             .putFloat("logo_center_y", configuration.logoCenterY)

@@ -89,3 +89,21 @@ object LogoGeometry {
         return NormalizedRect(centerX - width / 2f, centerY - height / 2f, centerX + width / 2f, centerY + height / 2f)
     }
 }
+
+object WhiteTransparency {
+    /**
+     * Remove branco puro e suaviza os 30 níveis próximos dele. Usar o menor canal mantém cores
+     * saturadas opacas: amarelo claro, por exemplo, não some só porque dois canais são altos.
+     */
+    fun applyToColor(color: Int): Int {
+        val originalAlpha = color ushr 24 and 0xff
+        val red = color ushr 16 and 0xff
+        val green = color ushr 8 and 0xff
+        val blue = color and 0xff
+        val distanceFromWhite = 255 - minOf(red, green, blue)
+        val keyedAlpha = (distanceFromWhite * 255 / FEATHER).coerceIn(0, 255)
+        return (originalAlpha * keyedAlpha / 255 shl 24) or (color and 0x00ffffff)
+    }
+
+    private const val FEATHER = 30
+}

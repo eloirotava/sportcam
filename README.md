@@ -31,7 +31,8 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
   servidor/chave do YouTube, persistidos localmente;
 - ícone opcional sobre a transmissão, carregado de PNG ou outra imagem, com transparência,
-  posição e tamanho configuráveis e persistidos;
+  posição e tamanho configuráveis e persistidos, além de opção para transformar fundo branco
+  em transparente com borda suavizada;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 

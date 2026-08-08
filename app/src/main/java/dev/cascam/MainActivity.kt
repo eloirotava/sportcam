@@ -63,6 +63,7 @@ import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
+import dev.cascam.geometry.WhiteTransparency
 import dev.cascam.stream.YoutubePublisher
 import java.io.IOException
 import kotlin.math.atan2
@@ -111,6 +112,7 @@ class MainActivity : AppCompatActivity() {
     private var clockPanX = 0f
     private var clockPanY = 0f
     private var logoUri = ""
+    private var originalLogoBitmap: Bitmap? = null
     private var logoBitmap: Bitmap? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
@@ -160,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         binding.clockEnabled.isChecked = configuration.clockEnabled
         logoUri = configuration.logoUri
         binding.logoEnabled.isChecked = configuration.logoEnabled
+        binding.logoWhiteTransparent.isChecked = configuration.logoWhiteTransparent
         binding.logoSize.progress = (configuration.logoWidth * 100f).toInt()
         binding.logoPositionX.progress = (configuration.logoCenterX * 100f).toInt()
         binding.logoPositionY.progress = (configuration.logoCenterY * 100f).toInt()
@@ -254,13 +257,17 @@ class MainActivity : AppCompatActivity() {
         binding.removeLogo.setOnClickListener {
             logoUri = ""
             binding.logoEnabled.isChecked = false
-            setLogoBitmap(null)
+            setOriginalLogoBitmap(null)
             updateLogoLabels()
             applyCompositionConfiguration()
         }
         binding.saveLogo.setOnClickListener { saveConfiguration(); toast("Ícone salvo") }
         binding.saveVideo.setOnClickListener { saveConfiguration(); toast("Qualidade de saída salva") }
         binding.logoEnabled.setOnClickListener { applyCompositionConfiguration() }
+        binding.logoWhiteTransparent.setOnClickListener {
+            refreshLogoBitmap()
+            applyCompositionConfiguration()
+        }
         listOf(binding.logoSize, binding.logoPositionX, binding.logoPositionY).forEach { seekBar ->
             seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -508,6 +515,7 @@ class MainActivity : AppCompatActivity() {
             clockCaptureZoom = captureZoom(binding.clockCaptureZoom.progress),
             logoUri = logoUri,
             logoEnabled = binding.logoEnabled.isChecked && logoBitmap != null,
+            logoWhiteTransparent = binding.logoWhiteTransparent.isChecked,
             logoWidth = (binding.logoSize.progress.coerceIn(5, 50) / 100f),
             logoCenterX = binding.logoPositionX.progress.coerceIn(0, 100) / 100f,
             logoCenterY = binding.logoPositionY.progress.coerceIn(0, 100) / 100f,
@@ -537,7 +545,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadLogo(encodedUri: String) {
         if (encodedUri.isBlank()) {
-            setLogoBitmap(null)
+            setOriginalLogoBitmap(null)
             updateLogoLabels()
             return
         }
@@ -551,11 +559,27 @@ class MainActivity : AppCompatActivity() {
                     decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
                 }
             }
-        }.onSuccess(::setLogoBitmap).onFailure {
-            setLogoBitmap(null)
+        }.onSuccess(::setOriginalLogoBitmap).onFailure {
+            setOriginalLogoBitmap(null)
             binding.logoFileStatus.text = "Não consegui abrir a imagem selecionada. Escolha o arquivo novamente."
         }
         updateLogoLabels()
+    }
+
+    private fun setOriginalLogoBitmap(bitmap: Bitmap?) {
+        originalLogoBitmap = bitmap
+        refreshLogoBitmap()
+    }
+
+    private fun refreshLogoBitmap() {
+        val original = originalLogoBitmap
+        val rendered = if (original != null && binding.logoWhiteTransparent.isChecked) {
+            val pixels = IntArray(original.width * original.height)
+            original.getPixels(pixels, 0, original.width, 0, 0, original.width, original.height)
+            for (index in pixels.indices) pixels[index] = WhiteTransparency.applyToColor(pixels[index])
+            Bitmap.createBitmap(pixels, original.width, original.height, Bitmap.Config.ARGB_8888)
+        } else original
+        setLogoBitmap(rendered)
     }
 
     private fun setLogoBitmap(bitmap: Bitmap?) {

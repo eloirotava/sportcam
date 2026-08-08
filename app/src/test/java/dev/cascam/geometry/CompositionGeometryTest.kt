@@ -54,6 +54,13 @@ class CompositionGeometryTest {
         assertEquals(1f, destination.bottom, .0001f)
     }
 
+    @Test fun `white key removes white and preserves saturated colors`() {
+        assertEquals(0, WhiteTransparency.applyToColor(0xffffffff.toInt()) ushr 24)
+        assertEquals(255, WhiteTransparency.applyToColor(0xffff0000.toInt()) ushr 24)
+        val feathered = WhiteTransparency.applyToColor(0xfff0f0f0.toInt()) ushr 24
+        assertEquals(true, feathered in 1..254)
+    }
+
     @Test fun `shared overlay sources open a camera only once`() {
         val configuration = BroadcastConfiguration(
             courtCameraId = "wide",

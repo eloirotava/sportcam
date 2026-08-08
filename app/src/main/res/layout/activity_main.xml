@@ -163,6 +163,8 @@
                 <LinearLayout android:id="@+id/panel_logo" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Ícone da transmissão" />
                     <CheckBox android:id="@+id/logo_enabled" android:layout_width="match_parent" android:layout_height="52dp" android:text="Mostrar ícone sobre o vídeo" android:textColor="#FFFFFF" />
+                    <CheckBox android:id="@+id/logo_white_transparent" android:layout_width="match_parent" android:layout_height="52dp" android:text="Transformar branco em transparente" android:textColor="#FFFFFF" />
+                    <TextView style="@style/PanelHint" android:text="Também suaviza os tons quase brancos da borda para evitar recorte serrilhado." />
                     <TextView style="@style/PanelText" android:text="Escolha uma imagem, preferencialmente PNG com fundo transparente. Ela será incorporada à prévia e ao vídeo enviado." />
                     <ImageView android:id="@+id/logo_preview" android:layout_width="match_parent" android:layout_height="96dp" android:layout_marginTop="8dp" android:background="#121A24" android:contentDescription="Prévia do ícone" android:scaleType="centerInside" />
                     <TextView android:id="@+id/logo_file_status" style="@style/PanelHint" android:text="Nenhuma imagem selecionada." />
