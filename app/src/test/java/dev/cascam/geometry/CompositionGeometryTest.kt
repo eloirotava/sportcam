@@ -4,6 +4,7 @@ import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.config.CaptureProfile
 import dev.cascam.config.CaptureSettings
 import dev.cascam.config.OverlayLayer
+import dev.cascam.config.OutputResolution
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraInfo
 import dev.cascam.camera.LensFacing
@@ -42,6 +43,15 @@ class CompositionGeometryTest {
         assertEquals(16f / 9f, crop.width * 2400f / (crop.height * 1080f), .0001f)
         assertEquals(1f, crop.right, .0001f)
         assertEquals(0f, crop.top, .0001f)
+    }
+
+    @Test fun `logo keeps image ratio and stays inside output`() {
+        val destination = LogoGeometry.destination(1920, 1080, 800, 400, .2f, 1f, 1f)
+
+        assertEquals(.2f, destination.width, .0001f)
+        assertEquals(.2f * 1920f / 1080f * .5f, destination.height, .0001f)
+        assertEquals(1f, destination.right, .0001f)
+        assertEquals(1f, destination.bottom, .0001f)
     }
 
     @Test fun `shared overlay sources open a camera only once`() {
@@ -97,6 +107,24 @@ class CompositionGeometryTest {
 
     @Test fun `capture profile has a readable label`() {
         assertEquals("1920×1080 · 30 fps", CaptureProfile(1920, 1080, 30).label)
+    }
+
+    @Test fun `output resolutions are explicit and independent from bitrate`() {
+        assertEquals(640 to 360, OutputResolution.P360.width to OutputResolution.P360.height)
+        assertEquals(960 to 540, OutputResolution.P540.width to OutputResolution.P540.height)
+        assertEquals(1280 to 720, OutputResolution.HD.width to OutputResolution.HD.height)
+        assertEquals(1920 to 1080, OutputResolution.FULL_HD.width to OutputResolution.FULL_HD.height)
+    }
+
+    @Test fun `automatic court capture follows output fps`() {
+        val configuration = BroadcastConfiguration(courtCameraId = "wide", captureFps = 0, outputFps = 30)
+
+        assertEquals(30, configuration.resolvedCaptureSettings("wide").fps)
+    }
+
+    @Test fun `full hd sixty recommends higher bitrate`() {
+        assertEquals(6_000_000, OutputResolution.FULL_HD.recommendedBitrate(30))
+        assertEquals(9_000_000, OutputResolution.FULL_HD.recommendedBitrate(60))
     }
 
     @Test fun `shared camera resolves the most demanding layer profile`() {

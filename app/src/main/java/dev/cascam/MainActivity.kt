@@ -5,6 +5,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -12,7 +14,6 @@ import android.hardware.SensorManager
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
-import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -48,6 +49,7 @@ import dev.cascam.camera.MultiCameraEngine
 import dev.cascam.config.CompositionEngine
 import dev.cascam.config.FrameRotation
 import dev.cascam.config.OverlayLayer
+import dev.cascam.config.OutputResolution
 import dev.cascam.gl.GlCompositor
 import android.view.SurfaceHolder
 import dev.cascam.config.BroadcastConfiguration
@@ -70,7 +72,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
-    private enum class Screen { BROADCAST, COURT, SCOREBOARD, CLOCK, DIAGNOSTICS }
+    private enum class Screen { BROADCAST, VIDEO, COURT, SCOREBOARD, CLOCK, LOGO, DIAGNOSTICS }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var capabilities: CameraCapabilities
@@ -108,11 +110,24 @@ class MainActivity : AppCompatActivity() {
     private var scoreboardPanY = 0f
     private var clockPanX = 0f
     private var clockPanY = 0f
+    private var logoUri = ""
+    private var logoBitmap: Bitmap? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.CAMERA] == true || hasCameraPermission()) showScreen(screen)
         else toast("Permissão da câmera necessária")
+    }
+
+    private val logoPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        logoUri = uri.toString()
+        binding.logoEnabled.isChecked = true
+        loadLogo(logoUri)
+        applyCompositionConfiguration()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -143,6 +158,12 @@ class MainActivity : AppCompatActivity() {
         binding.clockCamera.setSelection(cameraIds.indexOf(configuration.cameraIdFor(OverlayLayer.CLOCK)).takeIf { it >= 0 } ?: 0)
         binding.scoreboardEnabled.isChecked = configuration.scoreboardEnabled
         binding.clockEnabled.isChecked = configuration.clockEnabled
+        logoUri = configuration.logoUri
+        binding.logoEnabled.isChecked = configuration.logoEnabled
+        binding.logoSize.progress = (configuration.logoWidth * 100f).toInt()
+        binding.logoPositionX.progress = (configuration.logoCenterX * 100f).toInt()
+        binding.logoPositionY.progress = (configuration.logoCenterY * 100f).toInt()
+        loadLogo(logoUri)
         binding.courtOverlay.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, OverlayLayer.entries.map { it.label })
         updateCaptureOptions(configuration.courtCameraId, null, configuration.captureWidth to configuration.captureHeight, configuration.captureFps)
         updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.SCOREBOARD), OverlayLayer.SCOREBOARD, configuration.scoreboardCaptureWidth to configuration.scoreboardCaptureHeight, configuration.scoreboardCaptureFps)
@@ -155,6 +176,10 @@ class MainActivity : AppCompatActivity() {
         binding.videoCodec.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, VideoCodec.entries.map { it.label })
         binding.videoCodec.setSelection(VideoCodec.entries.indexOf(configuration.videoCodec))
         binding.videoCodec.isEnabled = configuration.protocol == BroadcastProtocol.HLS
+        binding.outputResolution.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, OutputResolution.entries.map { it.label })
+        binding.outputResolution.setSelection(OutputResolution.entries.indexOf(configuration.outputResolution))
+        binding.outputFps.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, OUTPUT_FPS_OPTIONS.map { "$it fps" })
+        binding.outputFps.setSelection(OUTPUT_FPS_OPTIONS.indexOf(configuration.outputFps).coerceAtLeast(0))
         binding.compositionEngine.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, CompositionEngine.entries.map { it.label })
         binding.compositionEngine.setSelection(CompositionEngine.entries.indexOf(configuration.compositionEngine))
         binding.compositionEngine.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -196,13 +221,17 @@ class MainActivity : AppCompatActivity() {
         binding.compositionOverlay.setClockDestination(configuration.clockDestination)
         binding.compositionOverlay.setEnabledOverlays(configuration.scoreboardEnabled, configuration.clockEnabled)
         updateZoomLabels()
+        updateLogoLabels()
+        updateOutputQualityHint()
     }
 
     private fun configureActions() {
         binding.navBroadcast.setOnClickListener { showScreen(Screen.BROADCAST) }
+        binding.navVideo.setOnClickListener { showScreen(Screen.VIDEO) }
         binding.navCourt.setOnClickListener { showScreen(Screen.COURT) }
         binding.navScoreboard.setOnClickListener { showScreen(Screen.SCOREBOARD) }
         binding.navClock.setOnClickListener { showScreen(Screen.CLOCK) }
+        binding.navLogo.setOnClickListener { showScreen(Screen.LOGO) }
         binding.navDiagnostics.setOnClickListener { showScreen(Screen.DIAGNOSTICS) }
         binding.runProbe.setOnClickListener { toggleProbe() }
         binding.copyProbeReport.setOnClickListener { copyProbeReport() }
@@ -221,6 +250,37 @@ class MainActivity : AppCompatActivity() {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("Abra $url") }
         }
         binding.checkLive.setOnClickListener { checkLiveHealth() }
+        binding.selectLogo.setOnClickListener { logoPicker.launch(arrayOf("image/png", "image/*")) }
+        binding.removeLogo.setOnClickListener {
+            logoUri = ""
+            binding.logoEnabled.isChecked = false
+            setLogoBitmap(null)
+            updateLogoLabels()
+            applyCompositionConfiguration()
+        }
+        binding.saveLogo.setOnClickListener { saveConfiguration(); toast("Ícone salvo") }
+        binding.saveVideo.setOnClickListener { saveConfiguration(); toast("Qualidade de saída salva") }
+        binding.logoEnabled.setOnClickListener { applyCompositionConfiguration() }
+        listOf(binding.logoSize, binding.logoPositionX, binding.logoPositionY).forEach { seekBar ->
+            seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    updateLogoLabels()
+                    if (fromUser) applyCompositionConfiguration()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+        }
+        val outputListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateOutputQualityHint()
+                applyCompositionConfiguration()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.outputResolution.onItemSelectedListener = outputListener
+        binding.outputFps.onItemSelectedListener = outputListener
+        binding.bitratePreset.onItemSelectedListener = outputListener
         binding.cropLarger.setOnClickListener { binding.compositionOverlay.changeCropZoom(-.25f) }
         binding.cropSmaller.setOnClickListener { binding.compositionOverlay.changeCropZoom(.25f) }
         binding.compositionOverlay.onCropChanged = { _, _, _ ->
@@ -269,7 +329,7 @@ class MainActivity : AppCompatActivity() {
         val cameraListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 updateAllCaptureOptions()
-                if (screen != Screen.BROADCAST) startCamera(cameraIdFor(screen))
+                if (screen != Screen.BROADCAST && screen != Screen.VIDEO && screen != Screen.LOGO) startCamera(cameraIdFor(screen))
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
@@ -312,27 +372,34 @@ class MainActivity : AppCompatActivity() {
         if (target == Screen.COURT) startLevelSensor() else stopLevelSensor()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
+        binding.panelVideo.visibility = if (target == Screen.VIDEO) View.VISIBLE else View.GONE
         binding.panelCourt.visibility = if (target == Screen.COURT) View.VISIBLE else View.GONE
         binding.panelScoreboard.visibility = if (target == Screen.SCOREBOARD) View.VISIBLE else View.GONE
         binding.panelClock.visibility = if (target == Screen.CLOCK) View.VISIBLE else View.GONE
+        binding.panelLogo.visibility = if (target == Screen.LOGO) View.VISIBLE else View.GONE
         binding.panelDiagnostics.visibility = if (target == Screen.DIAGNOSTICS) View.VISIBLE else View.GONE
         when (target) {
             Screen.BROADCAST -> CompositionOverlayView.Mode.COMPOSITION
+            Screen.VIDEO -> CompositionOverlayView.Mode.COMPOSITION
             Screen.COURT -> CompositionOverlayView.Mode.COURT
             Screen.SCOREBOARD -> CompositionOverlayView.Mode.SCOREBOARD
             Screen.CLOCK -> CompositionOverlayView.Mode.CLOCK
+            Screen.LOGO -> CompositionOverlayView.Mode.COMPOSITION
             Screen.DIAGNOSTICS -> null
         }?.let(binding.compositionOverlay::setMode)
-        binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
+        binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS || target == Screen.LOGO || target == Screen.VIDEO) View.GONE else View.VISIBLE
         val gpuComposition = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
-        binding.composedOutput.visibility = if (target == Screen.BROADCAST && !gpuComposition) View.VISIBLE else View.GONE
-        binding.gpuOutput.visibility = if (target == Screen.BROADCAST && gpuComposition) View.VISIBLE else View.GONE
-        binding.preview.visibility = if (target == Screen.BROADCAST || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
+        val compositionScreen = target == Screen.BROADCAST || target == Screen.LOGO || target == Screen.VIDEO
+        binding.composedOutput.visibility = if (compositionScreen && !gpuComposition) View.VISIBLE else View.GONE
+        binding.gpuOutput.visibility = if (compositionScreen && gpuComposition) View.VISIBLE else View.GONE
+        binding.preview.visibility = if (compositionScreen || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
         binding.scoreboardPreviewContainer.visibility = View.GONE
         resetCourtTransform()
         applyScoreboardViewZoom()
         if (hasCameraPermission()) when (target) {
             Screen.BROADCAST -> startCompositionPreview()
+            Screen.VIDEO -> startCompositionPreview()
+            Screen.LOGO -> startCompositionPreview()
             // O teste precisa das câmeras livres: qualquer bind anterior seria confundido com falha do par.
             Screen.DIAGNOSTICS -> releaseCameras()
             else -> startCamera(cameraIdFor(target))
@@ -345,7 +412,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cameraIdFor(target: Screen): String? = when (target) {
-        Screen.BROADCAST, Screen.COURT -> cameraIds.getOrNull(binding.courtCamera.selectedItemPosition)
+        Screen.BROADCAST, Screen.VIDEO, Screen.COURT, Screen.LOGO -> cameraIds.getOrNull(binding.courtCamera.selectedItemPosition)
         Screen.SCOREBOARD -> cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition)
         Screen.CLOCK -> cameraIds.getOrNull(binding.clockCamera.selectedItemPosition)
         Screen.DIAGNOSTICS -> null
@@ -390,7 +457,9 @@ class MainActivity : AppCompatActivity() {
         }
         resolutionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sizes.map { it.first })
         resolutionSpinner.setSelection(sizes.indexOfFirst { it.second == preservedSize }.coerceAtLeast(0))
-        fpsSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsValues.map { if (it == 0) "Automático" else "$it fps" })
+        fpsSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, fpsValues.map {
+            if (it == 0) if (layer == null) "Seguir saída" else "Automático" else "$it fps"
+        })
         fpsSpinner.setSelection(fpsValues.indexOf(preservedFps).coerceAtLeast(0))
     }
 
@@ -437,8 +506,15 @@ class MainActivity : AppCompatActivity() {
             clockCaptureHeight = clockCaptureSize.second,
             clockCaptureFps = clockCaptureFpsOptions.getOrElse(binding.clockCaptureFps.selectedItemPosition) { 0 },
             clockCaptureZoom = captureZoom(binding.clockCaptureZoom.progress),
+            logoUri = logoUri,
+            logoEnabled = binding.logoEnabled.isChecked && logoBitmap != null,
+            logoWidth = (binding.logoSize.progress.coerceIn(5, 50) / 100f),
+            logoCenterX = binding.logoPositionX.progress.coerceIn(0, 100) / 100f,
+            logoCenterY = binding.logoPositionY.progress.coerceIn(0, 100) / 100f,
             protocol = BroadcastProtocol.entries[binding.broadcastProtocol.selectedItemPosition],
             videoCodec = VideoCodec.entries[binding.videoCodec.selectedItemPosition],
+            outputResolution = OutputResolution.entries[binding.outputResolution.selectedItemPosition],
+            outputFps = OUTPUT_FPS_OPTIONS.getOrElse(binding.outputFps.selectedItemPosition) { 20 },
             bitratePreset = BitratePreset.entries[binding.bitratePreset.selectedItemPosition],
             youtubeServerUrl = binding.youtubeServer.text.toString().trim().removeSuffix("/"),
             youtubeStreamKey = binding.youtubeKey.text.toString().trim(),
@@ -457,6 +533,47 @@ class MainActivity : AppCompatActivity() {
         compositionConfiguration = configuration
         binding.composedOutput.configure(configuration)
         compositor?.configure(configuration)
+    }
+
+    private fun loadLogo(encodedUri: String) {
+        if (encodedUri.isBlank()) {
+            setLogoBitmap(null)
+            updateLogoLabels()
+            return
+        }
+        runCatching {
+            val source = ImageDecoder.createSource(contentResolver, Uri.parse(encodedUri))
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val largest = maxOf(info.size.width, info.size.height)
+                if (largest > 2048) {
+                    val scale = 2048f / largest
+                    decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+                }
+            }
+        }.onSuccess(::setLogoBitmap).onFailure {
+            setLogoBitmap(null)
+            binding.logoFileStatus.text = "Não consegui abrir a imagem selecionada. Escolha o arquivo novamente."
+        }
+        updateLogoLabels()
+    }
+
+    private fun setLogoBitmap(bitmap: Bitmap?) {
+        logoBitmap = bitmap
+        binding.logoPreview.setImageBitmap(bitmap)
+        binding.composedOutput.setLogo(bitmap)
+        compositor?.setLogo(bitmap)
+    }
+
+    private fun updateLogoLabels() {
+        binding.logoFileStatus.text = when {
+            logoBitmap != null -> "Imagem pronta · ${logoBitmap!!.width}×${logoBitmap!!.height} px"
+            logoUri.isBlank() -> "Nenhuma imagem selecionada."
+            else -> binding.logoFileStatus.text
+        }
+        binding.removeLogo.isEnabled = logoUri.isNotBlank()
+        binding.logoSizeStatus.text = "Largura: ${binding.logoSize.progress.coerceIn(5, 50)}% do vídeo"
+        binding.logoPositionStatus.text = "Posição: ${binding.logoPositionX.progress}% horizontal · ${binding.logoPositionY.progress}% vertical"
     }
 
     private fun saveConfiguration() {
@@ -723,9 +840,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val configuration = validatedBroadcast() ?: return
-        val bitrate = configuration.bitratePreset.bitsPerSecond ?: if (
-            getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered
-        ) 350_000 else 3_000_000
+        val bitrate = configuration.bitratePreset.bitsPerSecond
+            ?: configuration.outputResolution.recommendedBitrate(configuration.outputFps)
         store.save(configuration)
         ContextCompat.startForegroundService(this, Intent(this, BroadcastService::class.java))
         // Em GPU o encoder recebe os quadros pela própria surface dele, que entra como mais um
@@ -734,7 +850,9 @@ class MainActivity : AppCompatActivity() {
         publisher = YoutubePublisher(
             configuration.protocol, configuration.videoCodec, bitrate,
             configuration.youtubeServerUrl, configuration.youtubeStreamKey, configuration.liveLatency,
-            fps = configuration.captureFps.takeIf { it > 0 } ?: YoutubePublisher.FPS,
+            videoWidth = configuration.outputResolution.width,
+            videoHeight = configuration.outputResolution.height,
+            fps = configuration.outputFps,
             useSurfaceInput = gpu,
             onInputSurface = { surface, presentationOriginNanos ->
                 runOnUiThread {
@@ -785,6 +903,7 @@ class MainActivity : AppCompatActivity() {
             binding.courtCamera, binding.scoreboardCamera, binding.clockCamera,
             binding.scoreboardEnabled, binding.clockEnabled,
             binding.captureResolution, binding.captureFps, binding.compositionEngine, binding.frameRotation,
+            binding.outputResolution, binding.outputFps, binding.videoCodec, binding.bitratePreset,
             binding.scoreboardCaptureResolution, binding.scoreboardCaptureFps,
             binding.clockCaptureResolution, binding.clockCaptureFps,
             binding.courtCaptureZoom, binding.scoreboardCaptureZoom, binding.clockCaptureZoom,
@@ -792,10 +911,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateZoomLabels() {
+        val output = OutputResolution.entries.getOrNull(binding.outputResolution.selectedItemPosition) ?: OutputResolution.HD
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
-        binding.courtCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.courtCaptureZoom.progress))
-        binding.scoreboardCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
-        binding.clockCaptureZoomStatus.text = "Captura: %.1f× · aplicado antes da saída 1080p.".format(captureZoom(binding.clockCaptureZoom.progress))
+        binding.courtCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.courtCaptureZoom.progress))
+        binding.scoreboardCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
+        binding.clockCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.clockCaptureZoom.progress))
+    }
+
+    private fun updateOutputQualityHint() {
+        if (binding.outputResolution.adapter == null || binding.outputFps.adapter == null || binding.bitratePreset.adapter == null) return
+        val resolution = OutputResolution.entries.getOrNull(binding.outputResolution.selectedItemPosition) ?: OutputResolution.HD
+        val fps = OUTPUT_FPS_OPTIONS.getOrElse(binding.outputFps.selectedItemPosition) { 20 }
+        val preset = BitratePreset.entries.getOrNull(binding.bitratePreset.selectedItemPosition) ?: BitratePreset.AUTO
+        val bitrate = preset.bitsPerSecond ?: resolution.recommendedBitrate(fps)
+        val recommendation = resolution.recommendedBitrate(fps)
+        val warning = if (bitrate < recommendation) " · abaixo dos ${recommendation / 1_000_000f} Mbps sugeridos pelo SportCam" else ""
+        binding.outputQualityHint.text = "${resolution.height}p$fps · ${bitrate / 1_000f} kbps$warning"
+        updateZoomLabels()
     }
 
     private fun captureZoom(progress: Int): Float = 1f + progress.coerceIn(0, 70) / 10f
@@ -979,6 +1111,7 @@ class MainActivity : AppCompatActivity() {
         compositor = created
         val ids = plan.sources.map { it.id }
         created.configure(configuration)
+        created.setLogo(logoBitmap)
         created.configureSourceIds(ids, rotations)
         created.start(plan.sources.map { it.size }, rotations[ids.first()] ?: 0) {
             runOnUiThread {
@@ -1020,7 +1153,8 @@ class MainActivity : AppCompatActivity() {
         val ceiling = if (configured.captureWidth > 0 && configured.captureHeight > 0) {
             android.util.Size(configured.captureWidth, configured.captureHeight)
         } else DUAL_SENSOR_CEILING
-        val plan = engine.planFor(capabilities, court, scoreboard, ceiling, configured.captureFps) ?: return false
+        val captureFps = configured.captureFps.takeIf { it > 0 } ?: configured.outputFps
+        val plan = engine.planFor(capabilities, court, scoreboard, ceiling, captureFps) ?: return false
         val useGpu = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
         // Só abrir a lógica depois que o CameraX largou, senão o openCamera volta com CAMERA_IN_USE.
         val future = ProcessCameraProvider.getInstance(this)
@@ -1040,6 +1174,7 @@ class MainActivity : AppCompatActivity() {
         val created = GlCompositor { status -> runOnUiThread { binding.broadcastStatus.text = status } }
         compositor = created
         created.configure(readForm())
+        created.setLogo(logoBitmap)
         val rotation = compositionRotation(engine, plan, gpu = true)
         created.configureSourceIds(
             listOf(compositionConfiguration.courtCameraId, auxiliaryCameraId),
@@ -1228,5 +1363,6 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         /** Teto de captura dos dois sensores; o teste confirmou 1920x1080 neste aparelho. */
         val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
+        val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
     }
 }

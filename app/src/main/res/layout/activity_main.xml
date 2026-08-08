@@ -16,12 +16,18 @@
 
     <LinearLayout android:id="@+id/control_panel" android:layout_width="340dp" android:layout_height="0dp" android:orientation="vertical" android:padding="12dp"
         app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toTopOf="parent">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/nav_broadcast" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="AO VIVO" />
-            <Button android:id="@+id/nav_court" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="QUADRA" />
-            <Button android:id="@+id/nav_scoreboard" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="PLACAR" />
-            <Button android:id="@+id/nav_clock" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="CRONO" />
-            <Button android:id="@+id/nav_diagnostics" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="TESTE" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/nav_broadcast" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="AO VIVO" />
+                <Button android:id="@+id/nav_video" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="VÍDEO" />
+                <Button android:id="@+id/nav_court" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="QUADRA" />
+                <Button android:id="@+id/nav_scoreboard" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="PLACAR" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/nav_clock" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="CRONO" />
+                <Button android:id="@+id/nav_logo" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="ÍCONE" />
+                <Button android:id="@+id/nav_diagnostics" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="TESTE" />
+            </LinearLayout>
         </LinearLayout>
 
         <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
@@ -36,10 +42,6 @@
                     <TextView style="@style/PanelLabel" android:text="Rotação da imagem" />
                     <Spinner android:id="@+id/frame_rotation" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelHint" android:text="Vale só para a composição em GPU, que recebe o quadro pela SurfaceTexture e pode chegar já girado. Em CPU o giro é sempre automático." />
-                    <TextView style="@style/PanelLabel" android:text="Codec de vídeo" />
-                    <Spinner android:id="@+id/video_codec" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />
-                    <Spinner android:id="@+id/bitrate_preset" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Resolução da câmera da quadra" />
                     <Spinner android:id="@+id/capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="FPS da câmera da quadra" />
@@ -87,6 +89,22 @@
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
                     <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
+                </LinearLayout>
+
+                <LinearLayout android:id="@+id/panel_video" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                    <TextView style="@style/PanelTitle" android:text="Qualidade de saída" />
+                    <TextView style="@style/PanelText" android:text="Estas opções controlam o vídeo codificado e enviado. São independentes da resolução e do FPS usados para capturar cada câmera." />
+                    <TextView style="@style/PanelLabel" android:text="Resolução enviada" />
+                    <Spinner android:id="@+id/output_resolution" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView style="@style/PanelLabel" android:text="FPS enviado" />
+                    <Spinner android:id="@+id/output_fps" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView style="@style/PanelHint" android:text="O FPS é o limite do encoder. Para entregar todos os quadros, as câmeras também precisam capturar nesse FPS." />
+                    <TextView style="@style/PanelLabel" android:text="Codec de vídeo" />
+                    <Spinner android:id="@+id/video_codec" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />
+                    <Spinner android:id="@+id/bitrate_preset" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView android:id="@+id/output_quality_hint" style="@style/PanelHint" android:text="720p30 · automático: 3 Mbps" />
+                    <Button android:id="@+id/save_video" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="SALVAR QUALIDADE" />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
@@ -140,6 +158,27 @@
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/clock_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
                     <TextView android:id="@+id/clock_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
+                </LinearLayout>
+
+                <LinearLayout android:id="@+id/panel_logo" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                    <TextView style="@style/PanelTitle" android:text="Ícone da transmissão" />
+                    <CheckBox android:id="@+id/logo_enabled" android:layout_width="match_parent" android:layout_height="52dp" android:text="Mostrar ícone sobre o vídeo" android:textColor="#FFFFFF" />
+                    <TextView style="@style/PanelText" android:text="Escolha uma imagem, preferencialmente PNG com fundo transparente. Ela será incorporada à prévia e ao vídeo enviado." />
+                    <ImageView android:id="@+id/logo_preview" android:layout_width="match_parent" android:layout_height="96dp" android:layout_marginTop="8dp" android:background="#121A24" android:contentDescription="Prévia do ícone" android:scaleType="centerInside" />
+                    <TextView android:id="@+id/logo_file_status" style="@style/PanelHint" android:text="Nenhuma imagem selecionada." />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <Button android:id="@+id/select_logo" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="ESCOLHER PNG" />
+                        <Button android:id="@+id/remove_logo" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="REMOVER" />
+                    </LinearLayout>
+                    <TextView style="@style/PanelLabel" android:text="Tamanho" />
+                    <SeekBar android:id="@+id/logo_size" android:layout_width="match_parent" android:layout_height="wrap_content" android:min="5" android:max="50" />
+                    <TextView android:id="@+id/logo_size_status" style="@style/PanelHint" android:text="Largura: 18% do vídeo" />
+                    <TextView style="@style/PanelLabel" android:text="Posição horizontal" />
+                    <SeekBar android:id="@+id/logo_position_x" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
+                    <TextView style="@style/PanelLabel" android:text="Posição vertical" />
+                    <SeekBar android:id="@+id/logo_position_y" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
+                    <TextView android:id="@+id/logo_position_status" style="@style/PanelHint" android:text="Posição: 88% horizontal · 85% vertical" />
+                    <Button android:id="@+id/save_logo" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="SALVAR ÍCONE" />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_diagnostics" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">

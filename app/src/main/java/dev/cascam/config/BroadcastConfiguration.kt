@@ -29,8 +29,16 @@ data class BroadcastConfiguration(
     val clockCaptureHeight: Int = 0,
     val clockCaptureFps: Int = 0,
     val clockCaptureZoom: Float = 1f,
+    val logoUri: String = "",
+    val logoEnabled: Boolean = false,
+    /** Largura relativa à saída; a altura preserva a proporção original da imagem. */
+    val logoWidth: Float = .18f,
+    val logoCenterX: Float = .88f,
+    val logoCenterY: Float = .85f,
     val protocol: BroadcastProtocol = BroadcastProtocol.RTMPS,
     val videoCodec: VideoCodec = VideoCodec.H264,
+    val outputResolution: OutputResolution = OutputResolution.HD,
+    val outputFps: Int = 20,
     val bitratePreset: BitratePreset = BitratePreset.AUTO,
     val youtubeServerUrl: String = "rtmps://a.rtmps.youtube.com/live2",
     val youtubeStreamKey: String = "",
@@ -60,7 +68,9 @@ data class BroadcastConfiguration(
         } else null
 
     fun captureSettingsFor(layer: OverlayLayer?): CaptureSettings = when (layer) {
-        null -> CaptureSettings(captureWidth, captureHeight, captureFps)
+        // A fonte principal dirige o ritmo do compositor. Em "Seguir saída", pede à câmera o
+        // mesmo FPS configurado para o encoder em vez de deixar o HAL escolher silenciosamente.
+        null -> CaptureSettings(captureWidth, captureHeight, captureFps.takeIf { it > 0 } ?: outputFps)
         OverlayLayer.SCOREBOARD -> CaptureSettings(scoreboardCaptureWidth, scoreboardCaptureHeight, scoreboardCaptureFps)
         OverlayLayer.CLOCK -> CaptureSettings(clockCaptureWidth, clockCaptureHeight, clockCaptureFps)
     }
@@ -125,12 +135,28 @@ enum class FrameRotation(val label: String, val degrees: Int?) {
     THREE_QUARTERS("90° anti-horário", 270),
 }
 enum class VideoCodec(val label: String) { H264("H.264 / AVC"), H265("H.265 / HEVC") }
+enum class OutputResolution(val label: String, val width: Int, val height: Int) {
+    P360("360p · 640×360", 640, 360),
+    P540("540p · 960×540", 960, 540),
+    HD("720p · 1280×720", 1280, 720),
+    FULL_HD("1080p · 1920×1080", 1920, 1080);
+
+    fun recommendedBitrate(fps: Int): Int = when (this) {
+        P360 -> if (fps > 30) 1_500_000 else 800_000
+        P540 -> if (fps > 30) 3_000_000 else 1_500_000
+        HD -> if (fps > 30) 4_500_000 else 3_000_000
+        FULL_HD -> if (fps > 30) 9_000_000 else 6_000_000
+    }
+}
 enum class BitratePreset(val label: String, val bitsPerSecond: Int?) {
-    AUTO("Automático (Wi-Fi alto / dados baixo)", null),
+    AUTO("Automático para resolução/FPS", null),
     ULTRA_LOW("Ultra baixo · 250 kbps", 250_000),
     LOW("Baixo · 500 kbps", 500_000),
     MEDIUM("Médio · 1,5 Mbps", 1_500_000),
     HIGH("Alto · 3 Mbps", 3_000_000),
+    VERY_HIGH("Muito alto · 4,5 Mbps", 4_500_000),
+    FULL_HD("Full HD · 6 Mbps", 6_000_000),
+    FULL_HD_60("Full HD 60 · 9 Mbps", 9_000_000),
 }
 enum class LivePrivacy(val label: String, val apiValue: String) {
     UNLISTED("Não listado", "unlisted"), PRIVATE("Privado", "private"), PUBLIC("Público", "public"),

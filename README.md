@@ -26,17 +26,23 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - compartilhamento de um único stream quando duas ou três camadas escolhem a mesma câmera;
 - seleção de resolução e FPS por fonte; camadas que compartilham câmera usam o perfil
   mais exigente entre elas;
+- saída configurável em 360p, 540p, 720p ou 1080p e 15, 20, 24, 30 ou 60 fps,
+  independente do bitrate;
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
   servidor/chave do YouTube, persistidos localmente;
+- ícone opcional sobre a transmissão, carregado de PNG ou outra imagem, com transparência,
+  posição e tamanho configuráveis e persistidos;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
 A interface é dividida em **Quadra**, onde o retângulo 16:9 é
 movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
 ajustados a área amarela capturada, a câmera e o zoom de visualização; **Cronômetro**,
-com os mesmos ajustes para a área roxa; e **Ao vivo**, que reúne a composição e os
-dados do YouTube. O botão de play codifica a composição em H.264/H.265, usando o FPS
-de captura selecionado (20 fps no automático), captura o microfone em AAC mono a
+com os mesmos ajustes para a área roxa; **Ícone**, que mostra a composição enquanto
+ajusta a imagem, posição e tamanho; e **Ao vivo**, que reúne a composição e os
+dados do YouTube. A tela **Vídeo** escolhe resolução, FPS, codec e bitrate de saída.
+O botão de play codifica a composição em H.264/H.265, faz a captura principal seguir
+o FPS de saída quando ela está em “Seguir saída”, captura o microfone em AAC mono a
 44,1 kHz e publica por RTMPS ou ingestão HLS. Quando o aparelho anuncia o grupo
 simultâneo, a tela Ao vivo abre as fontes distintas selecionadas; camadas que apontam
 para a mesma câmera compartilham o stream. CPU e GPU fazem o recorte da quadra e
@@ -208,10 +214,11 @@ mais `FLAG_KEEP_SCREEN_ON`, então o timeout normal do Android também apaga a t
 sozinho enquanto a live continua. Encerrar pela
 notificação ainda será acrescentado em uma etapa posterior.
 
-O seletor de bitrate oferece 250 kbps, 500 kbps, 1,5 Mbps e 3 Mbps. No modo
-**Automático**, redes não tarifadas usam 3 Mbps e redes marcadas como tarifadas
-(normalmente dados móveis) usam 350 kbps. Até 500 kbps, a saída cai automaticamente
-para 640×360 e o AAC para 32 kbps; acima disso usa 1280×720 e AAC a 128 kbps.
+O seletor de bitrate oferece 250 kbps, 500 kbps, 1,5 Mbps, 3 Mbps, 4,5 Mbps,
+6 Mbps e 9 Mbps. No modo **Automático**, o SportCam escolhe uma taxa coerente com a
+resolução e o FPS selecionados. O bitrate não reduz mais a resolução escondido: a
+saída usa exatamente 640×360, 960×540, 1280×720 ou 1920×1080 conforme a tela Vídeo.
+Taxas de até 500 kbps usam AAC a 32 kbps; acima disso, AAC a 128 kbps.
 
 Referências: [YouTube — HLS ingestion protocol](https://support.google.com/youtube/answer/10349430)
 e [configurações recomendadas de encoder](https://support.google.com/youtube/answer/2853702).
@@ -292,7 +299,26 @@ which java
 java -version
 ```
 
-`which java` deve retornar `/usr/lib/jvm/java-17-openjdk-amd64/bin/java`.
+`which java` deve retornar o Java 17 selecionado pelo bootstrap ou, no Debian 13,
+`/usr/lib/jvm/java-21-openjdk-amd64/bin/java`.
+
+### Build em ambientes com rede de processos isolada
+
+Alguns sandboxes redirecionam até conexões locais entre processos. Neles, Gradle,
+o compilador Kotlin e o compilador Java podem falhar com mensagens como `Cannot
+accept connection from remote address` ou `Never received a connection from Gradle
+Worker Daemon`. Depois de executar o bootstrap e preencher o cache Gradle, use uma
+network namespace temporária com loopback próprio:
+
+```bash
+./scripts/build-local-sandbox.sh --prepare-cache assembleDebug
+```
+
+O script usa `/tmp/sportcam-gradle-home` como cache gravável e executa o Gradle em
+modo offline. Use `--prepare-cache` na primeira execução ou depois de alterar
+dependências; nas seguintes, basta `./scripts/build-local-sandbox.sh assembleDebug`.
+Ele requer permissão para `unshare --net`; em um Linux comum, sem esse tipo de
+isolamento, continue usando simplesmente `gradle assembleDebug`.
 
 Se preferir executar cada etapa manualmente, abra
 `scripts/bootstrap-codespaces.sh`: ele contém os comandos completos, sem esconder a

@@ -22,6 +22,8 @@ class YoutubePublisher(
     private val serverUrl: String,
     private val streamKey: String,
     private val latency: LiveLatency,
+    val videoWidth: Int,
+    val videoHeight: Int,
     private val fps: Int = FPS,
     /**
      * Em modo surface o encoder recebe os quadros direto de uma Surface, que é o que o caminho
@@ -34,8 +36,6 @@ class YoutubePublisher(
     private var inputSurface: Surface? = null
     private val running = AtomicBoolean()
     private val frames = ArrayBlockingQueue<Bitmap>(1)
-    val videoWidth = if (videoBitrate <= 500_000) 640 else 1280
-    val videoHeight = if (videoBitrate <= 500_000) 360 else 720
     private var worker: Thread? = null
     @Volatile private var activeTransport: MediaTransport? = null
     private var audioWorker: Thread? = null

@@ -32,12 +32,21 @@ class BroadcastConfigurationStore(context: Context) {
         clockCaptureHeight = preferences.getInt("clock_capture_height", 0).coerceAtLeast(0),
         clockCaptureFps = preferences.getInt("clock_capture_fps", 0).coerceAtLeast(0),
         clockCaptureZoom = preferences.getFloat("clock_capture_zoom", 1f).coerceIn(1f, 8f),
+        logoUri = preferences.getString("logo_uri", "").orEmpty(),
+        logoEnabled = preferences.getBoolean("logo_enabled", false),
+        logoWidth = preferences.getFloat("logo_width", .18f).coerceIn(.05f, .5f),
+        logoCenterX = preferences.getFloat("logo_center_x", .88f).coerceIn(0f, 1f),
+        logoCenterY = preferences.getFloat("logo_center_y", .85f).coerceIn(0f, 1f),
         protocol = runCatching {
             BroadcastProtocol.valueOf(preferences.getString("broadcast_protocol", null).orEmpty())
         }.getOrDefault(BroadcastProtocol.RTMPS),
         videoCodec = runCatching {
             VideoCodec.valueOf(preferences.getString("video_codec", null).orEmpty())
         }.getOrDefault(VideoCodec.H264),
+        outputResolution = runCatching {
+            OutputResolution.valueOf(preferences.getString("output_resolution", null).orEmpty())
+        }.getOrDefault(OutputResolution.HD),
+        outputFps = preferences.getInt("output_fps", 20).takeIf { it in OUTPUT_FPS_OPTIONS } ?: 20,
         bitratePreset = runCatching {
             BitratePreset.valueOf(preferences.getString("bitrate_preset", null).orEmpty())
         }.getOrDefault(BitratePreset.AUTO),
@@ -87,8 +96,15 @@ class BroadcastConfigurationStore(context: Context) {
             .putInt("clock_capture_height", configuration.clockCaptureHeight)
             .putInt("clock_capture_fps", configuration.clockCaptureFps)
             .putFloat("clock_capture_zoom", configuration.clockCaptureZoom)
+            .putString("logo_uri", configuration.logoUri)
+            .putBoolean("logo_enabled", configuration.logoEnabled)
+            .putFloat("logo_width", configuration.logoWidth)
+            .putFloat("logo_center_x", configuration.logoCenterX)
+            .putFloat("logo_center_y", configuration.logoCenterY)
             .putString("broadcast_protocol", configuration.protocol.name)
             .putString("video_codec", configuration.videoCodec.name)
+            .putString("output_resolution", configuration.outputResolution.name)
+            .putInt("output_fps", configuration.outputFps)
             .putString("bitrate_preset", configuration.bitratePreset.name)
             .putString("youtube_server", configuration.youtubeServerUrl)
             .putString("youtube_key", configuration.youtubeStreamKey)
@@ -120,4 +136,8 @@ class BroadcastConfigurationStore(context: Context) {
         require(coordinates.size == 4)
         NormalizedRect(coordinates[0], coordinates[1], coordinates[2], coordinates[3])
     }.getOrDefault(fallback)
+
+    private companion object {
+        val OUTPUT_FPS_OPTIONS = setOf(15, 20, 24, 30, 60)
+    }
 }

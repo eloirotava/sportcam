@@ -1,5 +1,7 @@
 package dev.cascam.gl
 
+import android.graphics.Bitmap
+import android.graphics.PorterDuff
 import android.graphics.SurfaceTexture
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
@@ -10,6 +12,7 @@ import android.util.Size
 import android.view.Surface
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.geometry.NormalizedRect
+import dev.cascam.geometry.LogoGeometry
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -51,15 +54,22 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     private var courtTexture = 0
     private var scoreboardTexture = 0
     private var clockTexture = 0
+    private var logoTexture = 0
     private var courtStream: SurfaceTexture? = null
     private var scoreboardStream: SurfaceTexture? = null
     private var clockStream: SurfaceTexture? = null
+    private var logoStream: SurfaceTexture? = null
+    private var logoSurface: Surface? = null
     private val courtMatrix = FloatArray(16)
     private val scoreboardMatrix = FloatArray(16)
     private val clockMatrix = FloatArray(16)
+    private val logoMatrix = FloatArray(16)
     private var courtPending = false
     private var scoreboardPending = false
     private var clockPending = false
+    private var logoPending = false
+    private var logoSize: Size? = null
+    @Volatile private var requestedLogo: Bitmap? = null
     private var captureSize = Size(1920, 1080)
     private var rotationDegrees = 0
 
@@ -94,6 +104,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 courtTexture = createExternalTexture()
                 scoreboardTexture = createExternalTexture()
                 clockTexture = createExternalTexture()
+                logoTexture = createExternalTexture()
                 courtStream = SurfaceTexture(courtTexture).apply {
                     setDefaultBufferSize(courtSize.width, courtSize.height)
                     setOnFrameAvailableListener({ courtPending = true; handler.post(::render) }, handler)
@@ -106,16 +117,25 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                     setDefaultBufferSize(clockSize.width, clockSize.height)
                     setOnFrameAvailableListener({ clockPending = true }, handler)
                 }
+                logoStream = SurfaceTexture(logoTexture)
                 courtSurface = Surface(courtStream)
                 scoreboardSurface = Surface(scoreboardStream)
                 clockSurface = Surface(clockStream)
+                logoSurface = Surface(logoStream)
                 ready = true
+                uploadLogo(requestedLogo)
             }.onSuccess { onReady() }.onFailure { onStatus("Composição GPU indisponível: ${it.message}") }
         }
     }
 
     fun configure(value: BroadcastConfiguration) {
         configuration = value
+    }
+
+    /** Copia o bitmap uma vez para uma textura; os quadros seguintes continuam inteiramente na GPU. */
+    fun setLogo(bitmap: Bitmap?) {
+        requestedLogo = bitmap
+        handler.post { if (ready) uploadLogo(bitmap) }
     }
 
     /** Ordem das texturas: quadra, auxiliar/placar e cronômetro distinto. */
@@ -155,9 +175,11 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             targets.forEach { runCatching { egl.releaseSurface(it.eglSurface) } }
             targets.clear()
             courtSurface?.release(); scoreboardSurface?.release(); clockSurface?.release()
-            courtStream?.release(); scoreboardStream?.release(); clockStream?.release()
+            logoSurface?.release()
+            courtStream?.release(); scoreboardStream?.release(); clockStream?.release(); logoStream?.release()
             courtSurface = null; scoreboardSurface = null; clockSurface = null
             courtStream = null; scoreboardStream = null; clockStream = null
+            logoSurface = null; logoStream = null
             offscreen?.let { runCatching { egl.releaseSurface(it) } }
             offscreen = null
             egl.release()
@@ -188,6 +210,11 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             clockPending = false
             clockStream?.updateTexImage()
             clockStream?.getTransformMatrix(clockMatrix)
+        }
+        if (logoPending) {
+            logoPending = false
+            logoStream?.updateTexImage()
+            logoStream?.getTransformMatrix(logoMatrix)
         }
         if (targets.isEmpty()) return
 
@@ -250,6 +277,21 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                         clockDestination.right * 2f - 1f, 1f - clockDestination.bottom * 2f,
                     )
                 }
+                val currentLogoSize = logoSize
+                if (config.logoEnabled && currentLogoSize != null) {
+                    val logoDestination = LogoGeometry.destination(
+                        target.width, target.height, currentLogoSize.width, currentLogoSize.height,
+                        config.logoWidth, config.logoCenterX, config.logoCenterY,
+                    )
+                    GLES20.glEnable(GLES20.GL_BLEND)
+                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                    drawQuad(
+                        logoTexture, logoMatrix, Homography.unitSquareTo(0f, 0f, 1f, 1f),
+                        logoDestination.left * 2f - 1f, 1f - logoDestination.top * 2f,
+                        logoDestination.right * 2f - 1f, 1f - logoDestination.bottom * 2f,
+                    )
+                    GLES20.glDisable(GLES20.GL_BLEND)
+                }
 
                 GLES20.glDisableVertexAttribArray(unitHandle)
                 target.presentationOriginNanos?.let { origin ->
@@ -286,6 +328,25 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         GLES20.glUniformMatrix3fv(mapHandle, 1, false, map, 0)
         GLES20.glUniformMatrix4fv(textureMatrixHandle, 1, false, textureMatrix, 0)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+    }
+
+    private fun uploadLogo(bitmap: Bitmap?) {
+        if (bitmap == null) {
+            logoSize = null
+            return
+        }
+        val stream = logoStream ?: return
+        val surface = logoSurface ?: return
+        stream.setDefaultBufferSize(bitmap.width, bitmap.height)
+        val canvas = surface.lockCanvas(null)
+        try {
+            canvas.drawColor(0, PorterDuff.Mode.CLEAR)
+            canvas.drawBitmap(bitmap, 0f, 0f, null)
+        } finally {
+            surface.unlockCanvasAndPost(canvas)
+        }
+        logoSize = Size(bitmap.width, bitmap.height)
+        logoPending = true
     }
 
     // ---------------------------------------------------------------- programa

@@ -12,6 +12,7 @@ import android.util.AttributeSet
 import android.view.View
 import dev.cascam.config.BroadcastConfiguration
 import dev.cascam.geometry.NormalizedRect
+import dev.cascam.geometry.LogoGeometry
 import dev.cascam.stream.YoutubePublisher
 
 class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
@@ -19,6 +20,7 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
     private var courtFrame: Bitmap? = null
     private var scoreboardFrame: Bitmap? = null
     private var clockFrame: Bitmap? = null
+    private var logoBitmap: Bitmap? = null
     @Volatile private var configuration = BroadcastConfiguration()
     @Volatile private var exportIntervalNanos = 1_000_000_000L / YoutubePublisher.FPS
     var onComposedFrame: ((Bitmap) -> Unit)? = null
@@ -26,8 +28,12 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
 
     fun configure(value: BroadcastConfiguration) {
         configuration = value
-        val fps = value.captureFps.takeIf { it > 0 } ?: YoutubePublisher.FPS
+        val fps = value.outputFps
         exportIntervalNanos = 1_000_000_000L / fps
+        invalidate()
+    }
+    fun setLogo(bitmap: Bitmap?) {
+        logoBitmap = bitmap
         invalidate()
     }
     fun submitCourt(bitmap: Bitmap) = post {
@@ -60,7 +66,8 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         val now = System.nanoTime()
         if (onComposedFrame != null && now - lastExportNanos >= exportIntervalNanos) {
             lastExportNanos = now
-            val output = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
+            val resolution = configuration.outputResolution
+            val output = Bitmap.createBitmap(resolution.width, resolution.height, Bitmap.Config.ARGB_8888)
             render(Canvas(output), output.width, output.height)
             onComposedFrame?.invoke(output)
         }
@@ -75,6 +82,21 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         }
         if (config.clockEnabled) clockFrame?.let {
             drawOverlay(canvas, it, config.clockCorners, config.clockDestination, outputWidth, outputHeight)
+        }
+        if (config.logoEnabled) logoBitmap?.let { logo ->
+            val destination = LogoGeometry.destination(
+                outputWidth, outputHeight, logo.width, logo.height,
+                config.logoWidth, config.logoCenterX, config.logoCenterY,
+            )
+            canvas.drawBitmap(
+                logo,
+                null,
+                RectF(
+                    destination.left * outputWidth, destination.top * outputHeight,
+                    destination.right * outputWidth, destination.bottom * outputHeight,
+                ),
+                paint,
+            )
         }
     }
 

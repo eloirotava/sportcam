@@ -1,0 +1,21 @@
+gradle.afterProject { project ->
+    if (project.path == ':app') {
+        project.tasks.register('resolveSportCamLocalDependencies') {
+            doLast {
+                [
+                    'debugCompileClasspath',
+                    'debugRuntimeClasspath',
+                    'debugUnitTestCompileClasspath',
+                    'releaseUnitTestCompileClasspath'
+                ].each { configurationName ->
+                    def files = project.configurations.getByName(configurationName).incoming.artifactView {
+                        componentFilter { componentId ->
+                            componentId instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                        }
+                    }.files
+                    println "${configurationName}: ${files.size()} artefatos no cache"
+                }
+            }
+        }
+    }
+}

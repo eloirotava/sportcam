@@ -65,3 +65,27 @@ data class ScoreboardQuad(val corners: List<NormalizedPoint>) {
         ((current.x * next.y - next.x * current.y) / 2f).toDouble()
     }.toFloat()
 }
+
+object LogoGeometry {
+    /** Preserva a proporção do arquivo e impede que o ícone saia da área transmitida. */
+    fun destination(
+        outputWidth: Int,
+        outputHeight: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        requestedWidth: Float,
+        requestedCenterX: Float,
+        requestedCenterY: Float,
+    ): NormalizedRect {
+        require(outputWidth > 0 && outputHeight > 0 && imageWidth > 0 && imageHeight > 0)
+        var width = requestedWidth.coerceIn(.05f, .5f)
+        var height = width * outputWidth / outputHeight.toFloat() * imageHeight / imageWidth.toFloat()
+        if (height > .9f) {
+            width *= .9f / height
+            height = .9f
+        }
+        val centerX = requestedCenterX.coerceIn(width / 2f, 1f - width / 2f)
+        val centerY = requestedCenterY.coerceIn(height / 2f, 1f - height / 2f)
+        return NormalizedRect(centerX - width / 2f, centerY - height / 2f, centerX + width / 2f, centerY + height / 2f)
+    }
+}
