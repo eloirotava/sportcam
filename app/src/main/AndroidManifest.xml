@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 
     <application
@@ -15,7 +16,10 @@
         android:label="SportCam"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.SportCam">
-        <service android:name=".BroadcastService" android:exported="false" android:foregroundServiceType="camera|microphone" />
+        <service
+            android:name=".BroadcastService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
         <activity
             android:name=".MainActivity"
             android:screenOrientation="landscape"

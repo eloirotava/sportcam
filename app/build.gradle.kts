@@ -1,5 +1,11 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+val playKeystoreFile = providers.environmentVariable("SPORTCAM_KEYSTORE_FILE").orNull
+val playKeystorePassword = providers.environmentVariable("SPORTCAM_KEYSTORE_PASSWORD").orNull
+val playKeyAlias = providers.environmentVariable("SPORTCAM_KEY_ALIAS").orNull
+val playKeyPassword = providers.environmentVariable("SPORTCAM_KEY_PASSWORD").orNull
+val hasPlaySigning = listOf(playKeystoreFile, playKeystorePassword, playKeyAlias, playKeyPassword).all { !it.isNullOrBlank() }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,15 +13,30 @@ plugins {
 
 android {
     namespace = "dev.cascam"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.cascam"
         minSdk = 31
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.0.5"
+        targetSdk = 36
+        versionCode = 6
+        versionName = "0.0.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        if (hasPlaySigning) {
+            create("playRelease") {
+                storeFile = file(requireNotNull(playKeystoreFile))
+                storePassword = playKeystorePassword
+                keyAlias = playKeyAlias
+                keyPassword = playKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            if (hasPlaySigning) signingConfig = signingConfigs.getByName("playRelease")
+        }
     }
     buildFeatures { viewBinding = true }
     compileOptions {

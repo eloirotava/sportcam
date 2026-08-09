@@ -240,6 +240,15 @@ gradle assembleDebug
 
 O APK de debug será criado em `app/build/outputs/apk/debug/app-debug.apk`.
 
+## Google Play
+
+O projeto já gera Android App Bundle para a Play Store, usa API 36 e contém as
+declarações de serviço em primeiro plano para câmera e microfone. A política de
+privacidade, os textos da ficha e o roteiro completo do Play Console estão em
+[`docs/google-play-checklist.md`](docs/google-play-checklist.md). Depois de cadastrar a
+chave de upload como secrets do repositório, rode manualmente o Action
+**Build Google Play Bundle** para obter o `.aab` assinado.
+
 ### Compilando em um GitHub Codespace
 
 O repositório mantém apenas código-fonte: não versionamos o Gradle Wrapper JAR, SDK,

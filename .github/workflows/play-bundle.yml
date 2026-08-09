@@ -1,0 +1,65 @@
+name: Build Google Play Bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-play-bundle:
+    name: Test and build signed AAB
+    runs-on: ubuntu-22.04
+    env:
+      PLAY_UPLOAD_KEYSTORE_BASE64: ${{ secrets.PLAY_UPLOAD_KEYSTORE_BASE64 }}
+      SPORTCAM_KEYSTORE_PASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
+      SPORTCAM_KEY_ALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+      SPORTCAM_KEY_PASSWORD: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Prepare upload key
+        run: |
+          test -n "$PLAY_UPLOAD_KEYSTORE_BASE64" || { echo "Configure o secret PLAY_UPLOAD_KEYSTORE_BASE64"; exit 1; }
+          test -n "$SPORTCAM_KEYSTORE_PASSWORD" || { echo "Configure o secret PLAY_UPLOAD_STORE_PASSWORD"; exit 1; }
+          test -n "$SPORTCAM_KEY_ALIAS" || { echo "Configure o secret PLAY_UPLOAD_KEY_ALIAS"; exit 1; }
+          test -n "$SPORTCAM_KEY_PASSWORD" || { echo "Configure o secret PLAY_UPLOAD_KEY_PASSWORD"; exit 1; }
+          printf '%s' "$PLAY_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/sportcam-upload.jks"
+          echo "SPORTCAM_KEYSTORE_FILE=$RUNNER_TEMP/sportcam-upload.jks" >> "$GITHUB_ENV"
+
+      - name: Run tests and build signed bundle
+        run: gradle test bundleRelease --stacktrace
+
+      - name: Verify and rename bundle
+        run: |
+          jarsigner -verify -certs app/build/outputs/bundle/release/app-release.aab | grep -q "jar verified"
+          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)"/\1/p' app/build.gradle.kts)
+          test -n "$VERSION_NAME"
+          cp app/build/outputs/bundle/release/app-release.aab "SportCam-v$VERSION_NAME-play.aab"
+          echo "PLAY_BUNDLE=SportCam-v$VERSION_NAME-play.aab" >> "$GITHUB_ENV"
+
+      - name: Upload Play bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SportCam-Google-Play
+          path: ${{ env.PLAY_BUNDLE }}
+          if-no-files-found: error

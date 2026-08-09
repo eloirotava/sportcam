@@ -26,6 +26,7 @@ import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -263,6 +264,7 @@ class MainActivity : AppCompatActivity() {
         binding.copyPhotoProbeReport.setOnClickListener { copyPhotoProbeReport() }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { toggleBroadcast() }
+        binding.privacyButton.setOnClickListener { showPrivacyNotice() }
         binding.authorizeYoutube.setOnClickListener { authorizeYoutube() }
         binding.copyOauthCode.setOnClickListener {
             val code = deviceAuthorization?.userCode
@@ -1117,10 +1119,30 @@ class MainActivity : AppCompatActivity() {
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     private fun requestCameraIfNeeded() {
-        val missing = listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).filter {
+        val requested = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) requested += Manifest.permission.POST_NOTIFICATIONS
+        val missing = requested.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+    }
+
+    private fun showPrivacyNotice() {
+        AlertDialog.Builder(this)
+            .setTitle("Privacidade do SportCam")
+            .setMessage(
+                "O SportCam acessa câmera e microfone somente para compor a transmissão iniciada por você. " +
+                    "O vídeo e o áudio são enviados diretamente ao destino configurado, como o YouTube; " +
+                    "não passam por servidor próprio do SportCam. Configurações, credenciais e o ícone escolhido " +
+                    "ficam apenas neste aparelho. O app não usa anúncios nem ferramentas de análise.\n\n" +
+                    "Durante uma transmissão, câmera, microfone, codificação e rede continuam ativos em primeiro " +
+                    "plano mesmo com a tela apagada, sempre indicados por uma notificação persistente."
+            )
+            .setNeutralButton("Política completa") { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
+            }
+            .setPositiveButton("Entendi", null)
+            .show()
     }
 
     @ExperimentalCamera2Interop
@@ -1576,5 +1598,6 @@ class MainActivity : AppCompatActivity() {
         val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
         val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
         const val SCOREBOARD_MAX_ZOOM = 20f
+        const val PRIVACY_POLICY_URL = "https://github.com/eloirotava/sportcam/blob/main/docs/privacy-policy.md"
     }
 }

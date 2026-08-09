@@ -88,6 +88,8 @@
                     </LinearLayout>
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
+                    <TextView style="@style/PanelHint" android:text="Ao iniciar, câmera, microfone, codificação e envio permanecem ativos em primeiro plano — inclusive com a tela apagada — até você encerrar. Uma notificação persistente informa essa atividade." />
+                    <Button android:id="@+id/privacy_button" android:layout_width="match_parent" android:layout_height="48dp" android:text="PRIVACIDADE E USO EM SEGUNDO PLANO" />
                     <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
                     <TextView android:id="@+id/thermal_status" style="@style/PanelHint" android:text="Temperatura: monitorando…" />
                 </LinearLayout>
