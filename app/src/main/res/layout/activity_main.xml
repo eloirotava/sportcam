@@ -89,6 +89,7 @@
                     <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
                     <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
                     <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
+                    <TextView android:id="@+id/thermal_status" style="@style/PanelHint" android:text="Temperatura: monitorando…" />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_video" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
@@ -130,6 +131,8 @@
                     <TextView style="@style/PanelLabel" android:text="Fonte do placar" />
                     <Spinner android:id="@+id/scoreboard_source" android:layout_width="match_parent" android:layout_height="52dp" />
                     <TextView android:id="@+id/scoreboard_source_hint" style="@style/PanelHint" android:text="Vídeo acompanha qualquer mudança do placar." />
+                    <TextView android:id="@+id/scoreboard_photo_interval_label" style="@style/PanelLabel" android:text="Intervalo entre fotos" android:visibility="gone" />
+                    <Spinner android:id="@+id/scoreboard_photo_interval" android:layout_width="match_parent" android:layout_height="52dp" android:visibility="gone" />
                     <TextView style="@style/PanelText" android:text="Amarelo: ajuste os quatro cantos do placar inclinado; ele será planificado. A posição na composição fica na aba QUADRA, dentro do retângulo verde." />
                     <TextView style="@style/PanelLabel" android:text="Câmera do placar" />
                     <Spinner android:id="@+id/scoreboard_camera" android:layout_width="match_parent" android:layout_height="48dp" />

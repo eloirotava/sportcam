@@ -62,6 +62,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     private var stillSamplerHandle = 0
     private val stillTextures = mutableMapOf<String, Int>()
     private val stillSizes = mutableMapOf<String, Size>()
+    private val stillRegions = mutableMapOf<String, StillFrameGeometry.DecodeRegion>()
     private var courtTexture = 0
     private var scoreboardTexture = 0
     private var clockTexture = 0
@@ -151,7 +152,11 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     }
 
     /** Atualiza a textura 2D do placar e conserva a foto até a captura seguinte. */
-    fun submitStill(sourceId: String, bitmap: Bitmap) {
+    fun submitStill(
+        sourceId: String,
+        bitmap: Bitmap,
+        region: StillFrameGeometry.DecodeRegion? = null,
+    ) {
         handler.post {
             try {
                 if (!ready) return@post
@@ -165,7 +170,9 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                     GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
                     stillSizes[sourceId] = Size(bitmap.width, bitmap.height)
                 }
-                render()
+                if (region == null) stillRegions.remove(sourceId) else stillRegions[sourceId] = region
+                // A textura será usada no próximo quadro da quadra; renderizar já aqui duplicava
+                // uma composição completa a cada foto sem ganho visível.
             } catch (error: Throwable) {
                 onStatus("Falha ao atualizar foto do placar: ${error.message}")
             } finally {
@@ -214,7 +221,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             logoSurface?.release()
             courtStream?.release(); scoreboardStream?.release(); clockStream?.release(); logoStream?.release()
             if (stillTextures.isNotEmpty()) GLES20.glDeleteTextures(stillTextures.size, stillTextures.values.toIntArray(), 0)
-            stillTextures.clear(); stillSizes.clear()
+            stillTextures.clear(); stillSizes.clear(); stillRegions.clear()
             courtSurface = null; scoreboardSurface = null; clockSurface = null
             courtStream = null; scoreboardStream = null; clockStream = null
             logoSurface = null; logoStream = null
@@ -277,7 +284,10 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val stillSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
         val stillSize = stillSizes[stillSource]
         val stillCorners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillSize != null) {
-            StillFrameGeometry.fromVideoPreview(
+            val region = stillRegions[stillSource]
+            if (region != null) StillFrameGeometry.fromVideoPreviewToRegion(
+                config.scoreboardCorners, region, config.scoreboardCaptureZoom,
+            ) else StillFrameGeometry.fromVideoPreview(
                 config.scoreboardCorners, stillSize.width, stillSize.height, config.scoreboardCaptureZoom,
             )
         } else config.scoreboardCorners.map { point ->

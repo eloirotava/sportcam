@@ -17,6 +17,7 @@ import android.hardware.camera2.CaptureRequest
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.PowerManager
 import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
@@ -47,6 +48,8 @@ import dev.cascam.camera.DualCameraEngine
 import dev.cascam.camera.DualCameraProbe
 import dev.cascam.camera.MultiCameraEngine
 import dev.cascam.camera.PhotoScoreboardProbe
+import dev.cascam.camera.ThermalPhotoPolicy
+import dev.cascam.camera.ThermalPressure
 import dev.cascam.config.CompositionEngine
 import dev.cascam.config.FrameRotation
 import dev.cascam.config.OverlayLayer
@@ -60,12 +63,14 @@ import dev.cascam.config.VideoCodec
 import dev.cascam.config.BitratePreset
 import dev.cascam.config.LiveLatency
 import dev.cascam.config.LivePrivacy
+import dev.cascam.config.PHOTO_INTERVAL_OPTIONS_MILLIS
 import dev.cascam.youtube.YoutubeLiveApi
 import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
 import dev.cascam.geometry.WhiteTransparency
+import dev.cascam.geometry.StillFrameGeometry
 import dev.cascam.stream.YoutubePublisher
 import java.io.IOException
 import kotlin.math.atan2
@@ -119,6 +124,9 @@ class MainActivity : AppCompatActivity() {
     private var originalLogoBitmap: Bitmap? = null
     private var logoBitmap: Bitmap? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
+    private var powerManager: PowerManager? = null
+    @Volatile private var thermalPhotoMinimumIntervalMillis = 0L
+    private val thermalStatusListener = PowerManager.OnThermalStatusChangedListener { status -> applyThermalStatus(status) }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.CAMERA] == true || hasCameraPermission()) showScreen(screen)
@@ -146,6 +154,7 @@ class MainActivity : AppCompatActivity() {
         capabilities = CameraCapabilitiesReader.read(this)
         configureForm(store.load())
         configureActions()
+        startThermalMonitoring()
         showScreen(Screen.BROADCAST)
         requestCameraIfNeeded()
     }
@@ -165,6 +174,13 @@ class MainActivity : AppCompatActivity() {
         binding.scoreboardEnabled.isChecked = configuration.scoreboardEnabled
         binding.scoreboardSource.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, ScoreboardSource.entries.map { it.label })
         binding.scoreboardSource.setSelection(ScoreboardSource.entries.indexOf(configuration.scoreboardSource))
+        binding.scoreboardPhotoInterval.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            PHOTO_INTERVAL_OPTIONS_MILLIS.map(::photoIntervalLabel),
+        )
+        binding.scoreboardPhotoInterval.setSelection(
+            PHOTO_INTERVAL_OPTIONS_MILLIS.indexOf(configuration.scoreboardPhotoIntervalMillis).coerceAtLeast(0),
+        )
         binding.clockEnabled.isChecked = configuration.clockEnabled
         logoUri = configuration.logoUri
         binding.logoEnabled.isChecked = configuration.logoEnabled
@@ -322,6 +338,13 @@ class MainActivity : AppCompatActivity() {
                 updateScoreboardSourceHint()
                 applyCompositionConfiguration()
                 if (screen == Screen.BROADCAST && publisher == null) showScreen(Screen.BROADCAST)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.scoreboardPhotoInterval.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateScoreboardSourceHint()
+                applyCompositionConfiguration()
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
@@ -514,6 +537,9 @@ class MainActivity : AppCompatActivity() {
             scoreboardCameraId = cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition).orEmpty(),
             scoreboardEnabled = binding.scoreboardEnabled.isChecked,
             scoreboardSource = ScoreboardSource.entries.getOrElse(binding.scoreboardSource.selectedItemPosition) { ScoreboardSource.VIDEO },
+            scoreboardPhotoIntervalMillis = PHOTO_INTERVAL_OPTIONS_MILLIS.getOrElse(
+                binding.scoreboardPhotoInterval.selectedItemPosition,
+            ) { 1_000L },
             cropZoom = cropZoom, cropPanX = cropPanX, cropPanY = cropPanY,
             scoreboardCorners = binding.compositionOverlay.scoreboardCorners(),
             scoreboardDestination = binding.compositionOverlay.scoreboardDestination(),
@@ -1002,7 +1028,7 @@ class MainActivity : AppCompatActivity() {
     private fun setCaptureControlsEnabled(enabled: Boolean) {
         listOf<View>(
             binding.courtCamera, binding.scoreboardCamera, binding.clockCamera,
-            binding.scoreboardEnabled, binding.scoreboardSource, binding.clockEnabled,
+            binding.scoreboardEnabled, binding.scoreboardSource, binding.scoreboardPhotoInterval, binding.clockEnabled,
             binding.captureResolution, binding.captureFps, binding.compositionEngine, binding.frameRotation,
             binding.outputResolution, binding.outputFps, binding.videoCodec, binding.bitratePreset,
             binding.scoreboardCaptureResolution, binding.scoreboardCaptureFps,
@@ -1026,14 +1052,49 @@ class MainActivity : AppCompatActivity() {
         val courtId = cameraIds.getOrNull(binding.courtCamera.selectedItemPosition).orEmpty()
         val clockId = cameraIds.getOrNull(binding.clockCamera.selectedItemPosition).orEmpty()
         val camera = capabilities.camera(cameraId)
+        val photoSelected = source == ScoreboardSource.PHOTO_EVERY_SECOND
+        binding.scoreboardPhotoIntervalLabel.visibility = if (photoSelected) View.VISIBLE else View.GONE
+        binding.scoreboardPhotoInterval.visibility = if (photoSelected) View.VISIBLE else View.GONE
+        val interval = PHOTO_INTERVAL_OPTIONS_MILLIS.getOrElse(binding.scoreboardPhotoInterval.selectedItemPosition) { 1_000L }
         binding.scoreboardSourceHint.text = when {
             source == ScoreboardSource.VIDEO -> "Vídeo acompanha imediatamente qualquer mudança do placar."
             cameraId == courtId -> "Escolha para o placar uma câmera diferente da quadra."
             binding.clockEnabled.isChecked && clockId == cameraId -> "A câmera da foto precisa ser exclusiva; escolha outra para o cronômetro."
             camera?.maximumJpegSize == null -> "Esta câmera não anunciou resolução JPEG para o modo foto."
             else -> camera.maximumJpegSize.let { size ->
-                "Foto ${size.width}×${size.height} a cada 1 s · permanece na tela até a próxima. Os cantos marcados em 16:9 serão reaproveitados."
+                "Foto ${size.width}×${size.height} a cada ${photoIntervalLabel(interval)} · permanece na tela até a próxima. Se aquecer, o intervalo aumenta temporariamente."
             }
+        }
+    }
+
+    private fun photoIntervalLabel(intervalMillis: Long): String = when (intervalMillis) {
+        1_000L -> "1 segundo"
+        else -> "${intervalMillis / 1_000L} segundos"
+    }
+
+    private fun startThermalMonitoring() {
+        val manager = getSystemService(PowerManager::class.java).also { powerManager = it }
+        manager.addThermalStatusListener(ContextCompat.getMainExecutor(this), thermalStatusListener)
+        applyThermalStatus(manager.currentThermalStatus)
+    }
+
+    private fun applyThermalStatus(status: Int) {
+        val pressure = when (status) {
+            PowerManager.THERMAL_STATUS_NONE -> ThermalPressure.NORMAL
+            PowerManager.THERMAL_STATUS_LIGHT -> ThermalPressure.LIGHT
+            PowerManager.THERMAL_STATUS_MODERATE -> ThermalPressure.MODERATE
+            PowerManager.THERMAL_STATUS_SEVERE -> ThermalPressure.SEVERE
+            else -> ThermalPressure.CRITICAL
+        }
+        val minimum = ThermalPhotoPolicy.minimumIntervalMillis(pressure)
+        thermalPhotoMinimumIntervalMillis = minimum
+        multiCameraEngine?.setThermalStillMinimumInterval(minimum)
+        binding.thermalStatus.text = when (pressure) {
+            ThermalPressure.NORMAL -> "Temperatura: normal · fotos no intervalo configurado."
+            ThermalPressure.LIGHT -> "Temperatura: aquecimento leve · fotos no intervalo configurado."
+            ThermalPressure.MODERATE -> "⚠ Aquecimento moderado · fotos no mínimo a cada 2 segundos."
+            ThermalPressure.SEVERE -> "⚠ Aquecimento severo · fotos no mínimo a cada 5 segundos."
+            ThermalPressure.CRITICAL -> "⚠ Aquecimento crítico · fotos no mínimo a cada 10 segundos."
         }
     }
 
@@ -1203,18 +1264,28 @@ class MainActivity : AppCompatActivity() {
             val stillInterval = configuration.stillIntervalFor(id)
             val size = if (stillInterval > 0L) camera.maximumJpegSize ?: return@let null
             else captureSizeFor(configuration, id)
+            val decodeRegion = if (stillInterval > 0L) StillFrameGeometry.decodeRegion(
+                configuration.scoreboardCorners, size.width, size.height, configuration.scoreboardCaptureZoom,
+            ) else null
             MultiCameraEngine.Source(
-                id, camera.logicalCameraId, camera.physicalCameraId,
-                size, settings.fps, configuration.resolvedCaptureZoom(id), stillInterval,
+                id = id,
+                logicalId = camera.logicalCameraId,
+                physicalId = camera.physicalCameraId,
+                size = size,
+                fps = settings.fps,
+                zoom = configuration.resolvedCaptureZoom(id),
+                stillIntervalMillis = stillInterval,
+                stillDecodeRegion = decodeRegion,
             )
         } }
         if (sources.size != ids.size) return
         val rotations = sources.associate { it.id to if (it.isStill) 0 else rotationFor(it.logicalId) }
         val engine = multiCameraEngine ?: MultiCameraEngine(
             getSystemService(CameraManager::class.java),
-            onFrame = { id, bitmap -> deliverCompositionFrame(id, bitmap) },
+            onFrame = { id, bitmap, region -> deliverCompositionFrame(id, bitmap, region) },
             onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
         ).also { multiCameraEngine = it }
+        engine.setThermalStillMinimumInterval(thermalPhotoMinimumIntervalMillis)
         val plan = MultiCameraEngine.Plan(sources)
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -1253,11 +1324,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun deliverCompositionFrame(id: String, bitmap: Bitmap) {
+    private fun deliverCompositionFrame(
+        id: String,
+        bitmap: Bitmap,
+        stillRegion: StillFrameGeometry.DecodeRegion? = null,
+    ) {
         val configuration = compositionConfiguration
         if (configuration.stillIntervalFor(id) > 0L && configuration.compositionEngine == CompositionEngine.GPU) {
             val active = compositor
-            if (active?.isReady == true) active.submitStill(id, bitmap) else bitmap.recycle()
+            if (active?.isReady == true) active.submitStill(id, bitmap, stillRegion) else bitmap.recycle()
         } else submitSourceFrame(id, bitmap, configuration)
     }
 
@@ -1473,6 +1548,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopLevelSensor()
+        powerManager?.removeThermalStatusListener(thermalStatusListener)
+        powerManager = null
         probe?.shutdown()
         probe = null
         photoProbe?.shutdown()

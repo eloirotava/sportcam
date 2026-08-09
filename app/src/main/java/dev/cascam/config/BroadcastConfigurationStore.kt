@@ -14,6 +14,8 @@ class BroadcastConfigurationStore(context: Context) {
         scoreboardSource = runCatching {
             ScoreboardSource.valueOf(preferences.getString("scoreboard_source", null).orEmpty())
         }.getOrDefault(ScoreboardSource.VIDEO),
+        scoreboardPhotoIntervalMillis = preferences.getLong("scoreboard_photo_interval_ms", 1_000L)
+            .takeIf { it in PHOTO_INTERVAL_OPTIONS_MILLIS } ?: 1_000L,
         cropZoom = preferences.getFloat("crop_zoom", 1f),
         cropPanX = preferences.getFloat("crop_pan_x", 0f),
         cropPanY = preferences.getFloat("crop_pan_y", 0f),
@@ -80,6 +82,7 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("scoreboard_camera", configuration.scoreboardCameraId)
             .putBoolean("scoreboard_enabled", configuration.scoreboardEnabled)
             .putString("scoreboard_source", configuration.scoreboardSource.name)
+            .putLong("scoreboard_photo_interval_ms", configuration.scoreboardPhotoIntervalMillis)
             .putFloat("crop_zoom", configuration.cropZoom)
             .putFloat("crop_pan_x", configuration.cropPanX)
             .putFloat("crop_pan_y", configuration.cropPanY)

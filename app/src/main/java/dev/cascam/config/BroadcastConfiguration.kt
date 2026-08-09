@@ -8,6 +8,8 @@ data class BroadcastConfiguration(
     val scoreboardCameraId: String = "",
     val scoreboardEnabled: Boolean = true,
     val scoreboardSource: ScoreboardSource = ScoreboardSource.VIDEO,
+    /** Intervalo base entre fotos; a proteção térmica pode aumentá-lo temporariamente. */
+    val scoreboardPhotoIntervalMillis: Long = 1_000L,
     val cropZoom: Float = 1f,
     val cropPanX: Float = 0f,
     val cropPanY: Float = 0f,
@@ -73,7 +75,7 @@ data class BroadcastConfiguration(
     fun stillIntervalFor(cameraId: String): Long = if (
         scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && canUseScoreboardPhoto() &&
         cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId
-    ) 1_000L else 0L
+    ) scoreboardPhotoIntervalMillis.coerceIn(1_000L, 30_000L) else 0L
 
     val requestedCaptureProfile: CaptureProfile?
         get() = if (captureWidth > 0 && captureHeight > 0 && captureFps > 0) {
@@ -125,8 +127,10 @@ enum class OverlayLayer(val label: String) {
 
 enum class ScoreboardSource(val label: String) {
     VIDEO("Vídeo · acompanha movimento"),
-    PHOTO_EVERY_SECOND("Foto alta · 1 por segundo"),
+    PHOTO_EVERY_SECOND("Foto alta · intervalo configurável"),
 }
+
+val PHOTO_INTERVAL_OPTIONS_MILLIS = listOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
 

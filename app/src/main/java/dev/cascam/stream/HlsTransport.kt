@@ -22,6 +22,7 @@ class HlsTransport(
     private val segment = ByteArrayOutputStream()
     private val playlist = ArrayDeque<Segment>()
     private val continuity = mutableMapOf<Int, Int>()
+    private val packetScratch = ByteArray(TS_PACKET_SIZE)
     private var sps = ByteArray(0)
     private var pps = ByteArray(0)
     private var vps = ByteArray(0)
@@ -45,17 +46,16 @@ class HlsTransport(
             if (!keyFrame) return
             startSegment(timestampMs)
         }
-        val elementary = ByteArrayOutputStream().apply {
-            write(byteArrayOf(0, 0, 0, 1))
-            write(if (videoCodec == VideoCodec.H265) byteArrayOf(0x46, 0x01, 0x50) else byteArrayOf(9, 0xf0.toByte()))
+        val elementary = ArrayList<ByteArray>(nals.size * 2 + 8).apply {
+            add(if (videoCodec == VideoCodec.H265) H265_ACCESS_UNIT else H264_ACCESS_UNIT)
             if (keyFrame) {
-                if (vps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(vps) }
-                if (sps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(sps) }
-                if (pps.isNotEmpty()) { write(byteArrayOf(0, 0, 0, 1)); write(pps) }
+                if (vps.isNotEmpty()) { add(START_CODE); add(vps) }
+                if (sps.isNotEmpty()) { add(START_CODE); add(sps) }
+                if (pps.isNotEmpty()) { add(START_CODE); add(pps) }
             }
-            nals.forEach { write(byteArrayOf(0, 0, 0, 1)); write(it) }
-        }.toByteArray()
-        writePes(VIDEO_PID, 0xe0, elementary, timestampMs, timestampMs.toLong() * 90)
+            nals.forEach { add(START_CODE); add(it) }
+        }
+        writePes(VIDEO_PID, 0xe0, elementary, elementary.sumOf { it.size }, timestampMs, timestampMs.toLong() * 90)
         lastTimestampMs = maxOf(lastTimestampMs, timestampMs)
     }
 
@@ -66,7 +66,7 @@ class HlsTransport(
             0xff.toByte(), 0xf1.toByte(), 0x50, ((0x40) or (frameLength shr 11)).toByte(),
             (frameLength shr 3).toByte(), (((frameLength and 7) shl 5) or 0x1f).toByte(), 0xfc.toByte(),
         )
-        writePes(AUDIO_PID, 0xc0, adts + data, timestampMs, null)
+        writePes(AUDIO_PID, 0xc0, listOf(adts, data), adts.size + data.size, timestampMs, null)
         lastTimestampMs = maxOf(lastTimestampMs, timestampMs)
     }
 
@@ -93,42 +93,67 @@ class HlsTransport(
         segmentStartMs = -1
     }
 
-    private fun writePes(pid: Int, streamId: Int, data: ByteArray, timestampMs: Int, pcr: Long?) {
+    private fun writePes(
+        pid: Int,
+        streamId: Int,
+        data: List<ByteArray>,
+        dataSize: Int,
+        timestampMs: Int,
+        pcr: Long?,
+    ) {
         val pts = timestampMs.toLong() * 90
-        val length = if (streamId == 0xe0) 0 else (data.size + 8).coerceAtMost(0xffff)
-        val pes = ByteArrayOutputStream().apply {
-            write(byteArrayOf(0, 0, 1, streamId.toByte(), (length shr 8).toByte(), length.toByte(), 0x80.toByte(), 0x80.toByte(), 5))
-            write(pts(pts)); write(data)
-        }.toByteArray()
-        writePackets(pid, pes, true, pcr)
+        val length = if (streamId == 0xe0) 0 else (dataSize + 8).coerceAtMost(0xffff)
+        val header = ByteArray(14)
+        header[2] = 1
+        header[3] = streamId.toByte()
+        header[4] = (length shr 8).toByte()
+        header[5] = length.toByte()
+        header[6] = 0x80.toByte()
+        header[7] = 0x80.toByte()
+        header[8] = 5
+        writePts(header, 9, pts)
+        writePackets(pid, header, data, dataSize, true, pcr)
     }
 
-    private fun writeSection(pid: Int, section: ByteArray) = writePackets(pid, byteArrayOf(0) + section, true, null)
-    private fun writePackets(pid: Int, payload: ByteArray, payloadStart: Boolean, pcr: Long?) {
-        var offset = 0; var first = true
-        while (offset < payload.size) {
+    private fun writeSection(pid: Int, section: ByteArray) =
+        writePackets(pid, POINTER_FIELD, listOf(section), section.size, true, null)
+
+    private fun writePackets(
+        pid: Int,
+        prefix: ByteArray,
+        payloadParts: List<ByteArray>,
+        payloadSize: Int,
+        payloadStart: Boolean,
+        pcr: Long?,
+    ) {
+        val payloadCursor = PayloadCursor(prefix, payloadParts)
+        var remaining = prefix.size + payloadSize
+        var first = true
+        while (remaining > 0) {
             val includePcr = first && pcr != null
             val maximumPayload = if (includePcr) 176 else 184
-            val count = minOf(maximumPayload, payload.size - offset)
+            val count = minOf(maximumPayload, remaining)
             val needsAdaptation = includePcr || count < 184
-            val packet = ByteArray(188) { 0xff.toByte() }
-            packet[0] = 0x47
-            packet[1] = (((if (first && payloadStart) 0x40 else 0) or (pid shr 8)) and 0x5f).toByte()
-            packet[2] = pid.toByte()
+            packetScratch.fill(0xff.toByte())
+            packetScratch[0] = 0x47
+            packetScratch[1] = (((if (first && payloadStart) 0x40 else 0) or (pid shr 8)) and 0x5f).toByte()
+            packetScratch[2] = pid.toByte()
             val counter = continuity.getOrDefault(pid, 0); continuity[pid] = (counter + 1) and 15
-            packet[3] = ((if (needsAdaptation) 0x30 else 0x10) or counter).toByte()
-            var cursor = 4
+            packetScratch[3] = ((if (needsAdaptation) 0x30 else 0x10) or counter).toByte()
+            var packetCursor = 4
             if (needsAdaptation) {
                 val adaptationLength = 183 - count
-                packet[cursor++] = adaptationLength.toByte()
+                packetScratch[packetCursor++] = adaptationLength.toByte()
                 if (adaptationLength > 0) {
-                    packet[cursor++] = if (includePcr) 0x10 else 0
-                    if (includePcr) { pcrBytes(pcr!!).copyInto(packet, cursor); cursor += 6 }
-                    cursor = 4 + 1 + adaptationLength
+                    packetScratch[packetCursor++] = if (includePcr) 0x10 else 0
+                    if (includePcr) { writePcr(packetScratch, packetCursor, pcr!!); packetCursor += 6 }
+                    packetCursor = 4 + 1 + adaptationLength
                 }
             }
-            payload.copyInto(packet, cursor, offset, offset + count)
-            segment.write(packet); offset += count; first = false
+            payloadCursor.copyInto(packetScratch, packetCursor, count)
+            segment.write(packetScratch, 0, TS_PACKET_SIZE)
+            remaining -= count
+            first = false
         }
     }
 
@@ -167,11 +192,44 @@ class HlsTransport(
     }
 
     private data class Segment(val sequence: Int, val name: String, val duration: Double, val bytes: ByteArray)
+
+    private class PayloadCursor(
+        private val prefix: ByteArray,
+        private val parts: List<ByteArray>,
+    ) {
+        private var inPrefix = true
+        private var partIndex = 0
+        private var partOffset = 0
+
+        fun copyInto(destination: ByteArray, destinationOffset: Int, byteCount: Int) {
+            var target = destinationOffset
+            var remaining = byteCount
+            while (remaining > 0) {
+                val source = if (inPrefix) prefix else parts[partIndex]
+                val available = source.size - partOffset
+                val copied = minOf(available, remaining)
+                source.copyInto(destination, target, partOffset, partOffset + copied)
+                target += copied
+                remaining -= copied
+                partOffset += copied
+                if (partOffset == source.size) {
+                    partOffset = 0
+                    if (inPrefix) inPrefix = false else partIndex++
+                }
+            }
+        }
+    }
+
     companion object {
         private const val VIDEO_PID = 0x100
         private const val AUDIO_PID = 0x101
         private const val PMT_PID = 0x1000
         private const val WINDOW = 6
+        private const val TS_PACKET_SIZE = 188
+        private val START_CODE = byteArrayOf(0, 0, 0, 1)
+        private val H264_ACCESS_UNIT = byteArrayOf(0, 0, 0, 1, 9, 0xf0.toByte())
+        private val H265_ACCESS_UNIT = byteArrayOf(0, 0, 0, 1, 0x46, 0x01, 0x50)
+        private val POINTER_FIELD = byteArrayOf(0)
 
         private fun buildPrefix(server: String, key: String): String {
             var value = server.trim()
@@ -179,15 +237,22 @@ class HlsTransport(
             if (!value.contains("file=")) value += if (value.contains('?')) "&file=" else "?file="
             return value
         }
-        private fun pts(value: Long): ByteArray = byteArrayOf(
-            ((0x20 or (((value shr 30).toInt() and 7) shl 1) or 1)).toByte(),
-            (value shr 22).toByte(), ((((value shr 15).toInt() and 0x7f) shl 1) or 1).toByte(),
-            (value shr 7).toByte(), (((value.toInt() and 0x7f) shl 1) or 1).toByte(),
-        )
-        private fun pcrBytes(base: Long): ByteArray = byteArrayOf(
-            (base shr 25).toByte(), (base shr 17).toByte(), (base shr 9).toByte(), (base shr 1).toByte(),
-            (((base and 1) shl 7) or 0x7e).toByte(), 0,
-        )
+        private fun writePts(destination: ByteArray, offset: Int, value: Long) {
+            destination[offset] = (0x20 or (((value shr 30).toInt() and 7) shl 1) or 1).toByte()
+            destination[offset + 1] = (value shr 22).toByte()
+            destination[offset + 2] = ((((value shr 15).toInt() and 0x7f) shl 1) or 1).toByte()
+            destination[offset + 3] = (value shr 7).toByte()
+            destination[offset + 4] = (((value.toInt() and 0x7f) shl 1) or 1).toByte()
+        }
+
+        private fun writePcr(destination: ByteArray, offset: Int, base: Long) {
+            destination[offset] = (base shr 25).toByte()
+            destination[offset + 1] = (base shr 17).toByte()
+            destination[offset + 2] = (base shr 9).toByte()
+            destination[offset + 3] = (base shr 1).toByte()
+            destination[offset + 4] = (((base and 1) shl 7) or 0x7e).toByte()
+            destination[offset + 5] = 0
+        }
         private fun pat(): ByteArray = withCrc(byteArrayOf(0, 0xb0.toByte(), 0x0d, 0, 1, 0xc1.toByte(), 0, 0, 0, 1, 0xf0.toByte(), 0))
         private fun pmt(codec: VideoCodec): ByteArray = withCrc(byteArrayOf(2, 0xb0.toByte(), 0x17, 0, 1, 0xc1.toByte(), 0, 0, 0xe1.toByte(), 0, 0xf0.toByte(), 0, (if (codec == VideoCodec.H265) 0x24 else 0x1b).toByte(), 0xe1.toByte(), 0, 0xf0.toByte(), 0, 0x0f, 0xe1.toByte(), 1, 0xf0.toByte(), 0))
         private fun withCrc(section: ByteArray): ByteArray {
