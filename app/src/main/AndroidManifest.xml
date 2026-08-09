@@ -11,7 +11,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="SportCam"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.SportCam">
         <service android:name=".BroadcastService" android:exported="false" android:foregroundServiceType="camera|microphone" />
         <activity
