@@ -1597,7 +1597,7 @@ class MainActivity : AppCompatActivity() {
         /** Teto de captura dos dois sensores; o teste confirmou 1920x1080 neste aparelho. */
         val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
         val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
-        const val SCOREBOARD_MAX_ZOOM = 20f
+        const val SCOREBOARD_MAX_ZOOM = 8f
         const val PRIVACY_POLICY_URL = "https://github.com/eloirotava/sportcam/blob/main/docs/privacy-policy.md"
     }
 }

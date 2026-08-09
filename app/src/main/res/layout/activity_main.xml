@@ -143,10 +143,10 @@
                     <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
                     <Spinner android:id="@+id/scoreboard_capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="Zoom digital do placar" />
-                    <SeekBar android:id="@+id/scoreboard_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="190" />
+                    <SeekBar android:id="@+id/scoreboard_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
                     <TextView android:id="@+id/scoreboard_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
-                    <SeekBar android:id="@+id/scoreboard_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
+                    <SeekBar android:id="@+id/scoreboard_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="190" />
                     <TextView android:id="@+id/scoreboard_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
                 </LinearLayout>
 

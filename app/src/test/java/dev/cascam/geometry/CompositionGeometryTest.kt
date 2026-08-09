@@ -221,14 +221,14 @@ class CompositionGeometryTest {
         assertEquals(5f, configuration.resolvedCaptureZoom("shared"))
     }
 
-    @Test fun `scoreboard capture zoom is preserved up to twenty times`() {
+    @Test fun `scoreboard capture zoom is limited to eight times`() {
         val configuration = BroadcastConfiguration(
             courtCameraId = "wide",
             scoreboardCameraId = "tele",
             scoreboardCaptureZoom = 20f,
         )
 
-        assertEquals(20f, configuration.resolvedCaptureZoom("tele"))
+        assertEquals(8f, configuration.resolvedCaptureZoom("tele"))
     }
 
     @Test fun `simultaneous support follows logical camera groups`() {

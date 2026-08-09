@@ -106,7 +106,7 @@ data class BroadcastConfiguration(
         if (courtCameraId == cameraId) add(captureZoom)
         if (scoreboardEnabled && cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId) add(scoreboardCaptureZoom)
         if (clockEnabled && cameraIdFor(OverlayLayer.CLOCK) == cameraId) add(clockCaptureZoom)
-    }.maxOrNull()?.coerceIn(1f, 20f) ?: 1f
+    }.maxOrNull()?.coerceIn(1f, 8f) ?: 1f
 }
 
 data class CaptureSettings(val width: Int = 0, val height: Int = 0, val fps: Int = 0) {

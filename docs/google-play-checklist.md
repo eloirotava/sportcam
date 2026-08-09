@@ -2,7 +2,7 @@
 
 ## O que já está preparado no projeto
 
-- pacote Android `dev.cascam`, `versionCode 6`, versão `0.0.6`;
+- pacote Android `dev.cascam`, `versionCode 7`, versão `0.0.7`;
 - `targetSdk` e `compileSdk` 36;
 - Android App Bundle (`.aab`) de release com assinatura por variáveis de ambiente;
 - Action manual **Build Google Play Bundle**;
