@@ -30,6 +30,7 @@ data class CameraInfo(
     /** Ângulo horizontal aproximado em graus; quanto maior, mais quadra cabe no quadro. */
     val horizontalFieldOfView: Float? = null,
     val maximumYuvSize: Size? = null,
+    val maximumJpegSize: Size? = null,
     val hardwareLevel: String = "?",
     val logicalMultiCamera: Boolean = false,
     /**
@@ -74,6 +75,7 @@ data class CameraInfo(
         append(" · ").append(lensLabel)
         minimumFocalLength?.let { append(" · ").append("%.1f mm".format(it)) }
         maximumYuvSize?.let { append(" · YUV máx ").append("${it.width}x${it.height}") }
+        maximumJpegSize?.let { append(" · foto máx ").append("${it.width}x${it.height}") }
         if (isPhysical) losslessCropAt1080p?.takeIf { it > 1.05f }?.let {
             append(" · crop limpo até ").append("%.1f×".format(it)).append(" em 1080p")
         }
@@ -124,7 +126,7 @@ object CameraCapabilitiesReader {
             val logical = CameraInfo(
                 id, id, null,
                 characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
-                facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), level, multiCamera,
+                facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), maximumJpegSize(characteristics), level, multiCamera,
                 perPhysicalZoom(physicalKeys), physicalKeys, zoomRatioRange(characteristics),
                 yuvSizes(characteristics), fpsRanges(characteristics),
             )
@@ -136,6 +138,7 @@ object CameraCapabilitiesReader {
                     "$id/$physicalId", id, physicalId,
                     physicalCharacteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                     facing, horizontalFieldOfView(physicalCharacteristics), maximumYuvSize(physicalCharacteristics),
+                    maximumJpegSize(physicalCharacteristics) ?: maximumJpegSize(characteristics),
                     hardwareLevel(physicalCharacteristics), false,
                     PerPhysicalZoom.NONE, emptyList(), zoomRatioRange(physicalCharacteristics),
                     physicalSizes, physicalFps,
@@ -183,6 +186,11 @@ object CameraCapabilitiesReader {
     private fun maximumYuvSize(characteristics: CameraCharacteristics): Size? = characteristics
         .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         ?.getOutputSizes(ImageFormat.YUV_420_888)
+        ?.maxByOrNull { it.width.toLong() * it.height }
+
+    private fun maximumJpegSize(characteristics: CameraCharacteristics): Size? = characteristics
+        .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        ?.getOutputSizes(ImageFormat.JPEG)
         ?.maxByOrNull { it.width.toLong() * it.height }
 
     private fun yuvSizes(characteristics: CameraCharacteristics): List<Size> {

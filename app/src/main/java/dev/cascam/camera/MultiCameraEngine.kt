@@ -2,12 +2,11 @@ package dev.cascam.camera
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.graphics.Rect
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
-import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
@@ -38,7 +37,10 @@ class MultiCameraEngine(
         val size: Size,
         val fps: Int,
         val zoom: Float = 1f,
-    )
+        val stillIntervalMillis: Long = 0L,
+    ) {
+        val isStill: Boolean get() = stillIntervalMillis > 0L
+    }
     data class Plan(val sources: List<Source>)
 
     private val thread = HandlerThread("cascam-multi-camera").also { it.start() }
@@ -51,22 +53,34 @@ class MultiCameraEngine(
     private var plan: Plan? = null
     private var rotations = emptyMap<String, Int>()
     @Volatile private var running = false
+    @Volatile private var generation = 0
 
     @SuppressLint("MissingPermission")
     fun start(plan: Plan, rotations: Map<String, Int>, gpuSurfaces: Map<String, Surface>? = null) {
         stop()
+        val activeGeneration = generation
         this.plan = plan
         this.rotations = rotations
         running = true
         handler.post {
-            surfaces = gpuSurfaces ?: plan.sources.associate { source ->
-                val reader = ImageReader.newInstance(source.size.width, source.size.height, ImageFormat.YUV_420_888, 3)
+            surfaces = plan.sources.associate { source ->
+                val gpuSurface = gpuSurfaces?.get(source.id)
+                if (!source.isStill && gpuSurface != null) return@associate source.id to gpuSurface
+                val format = if (source.isStill) ImageFormat.JPEG else ImageFormat.YUV_420_888
+                val reader = ImageReader.newInstance(source.size.width, source.size.height, format, if (source.isStill) 2 else 3)
                 readers[source.id] = reader
                 reader.setOnImageAvailableListener({ available ->
                     val image = available.acquireLatestImage() ?: return@setOnImageAvailableListener
                     try {
-                        if (running) runCatching {
-                            onFrame(source.id, YuvFrameConverter.convert(image, source.size.width, rotations[source.id] ?: 0))
+                        if (running && generation == activeGeneration) runCatching {
+                            val bitmap = if (source.isStill) {
+                                val buffer = image.planes[0].buffer
+                                val jpeg = ByteArray(buffer.remaining()).also(buffer::get)
+                                // JPEG é entregue na orientação correta pelo HAL. A correção
+                                // manual da GPU pertence exclusivamente aos SurfaceTextures de vídeo.
+                                BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                            } else YuvFrameConverter.convert(image, source.size.width, rotations[source.id] ?: 0)
+                            onFrame(source.id, bitmap)
                         }.onFailure { onStatus("Falha ao converter ${source.id}: ${it.message}") }
                     } finally { image.close() }
                 }, handler)
@@ -81,6 +95,7 @@ class MultiCameraEngine(
 
     fun stop() {
         running = false
+        generation++
         handler.post {
             sessions.values.forEach { runCatching { it.stopRepeating() }; it.close() }
             devices.values.forEach { it.close() }
@@ -109,21 +124,28 @@ class MultiCameraEngine(
             override fun onConfigured(session: CameraCaptureSession) {
                 sessions[camera.id] = session
                 runCatching {
-                    val physicalIds = sources.mapNotNull { it.physicalId }.toSet()
+                    val videoSources = sources.filterNot { it.isStill }
+                    // O S22 aprovou exatamente esta forma: o repeating declara somente o sensor
+                    // de vídeo; a tele entra apenas no request JPEG avulso.
+                    val physicalIds = videoSources.mapNotNull { it.physicalId }.toSet()
                     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalIds.isNotEmpty()) {
                         camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD, physicalIds)
                     } else camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-                    val request = builder.apply {
-                        sources.forEach { addTarget(surfaces.getValue(it.id)) }
+                    if (videoSources.isNotEmpty()) builder.apply {
+                        videoSources.forEach { addTarget(surfaces.getValue(it.id)) }
                         set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                         set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-                        val requestedFps = sources.maxOfOrNull { it.fps } ?: 0
+                        val requestedFps = videoSources.maxOfOrNull { it.fps } ?: 0
                         fpsRange(camera.id, requestedFps)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-                        applyZooms(camera.id, sources, this)
-                    }.build()
-                    session.setRepeatingRequest(request, null, handler)
+                        // O zoom é aplicado de forma determinística na composição. Alguns HALs
+                        // Samsung aceitam a chave física sem realmente alterar o buffer.
+                    }.build().also { session.setRepeatingRequest(it, null, handler) }
+                    sources.filter { it.isStill }.forEach { scheduleStill(camera, session, it, generation, 250L) }
                     if (sessions.size == plan.sources.map { it.logicalId }.distinct().size) {
-                        val profiles = plan.sources.joinToString { "${it.id}=${it.size.width}×${it.size.height}@${it.fps.takeIf { fps -> fps > 0 } ?: "auto"} · %.1f×".format(it.zoom) }
+                        val profiles = plan.sources.joinToString { source ->
+                            val cadence = if (source.isStill) "foto/${source.stillIntervalMillis}ms" else "${source.fps.takeIf { it > 0 } ?: "auto"} fps"
+                            "${source.id}=${source.size.width}×${source.size.height}@$cadence · %.1f×".format(source.zoom)
+                        }
                         onStatus("${plan.sources.size} fonte(s) Camera2 ativas · $profiles")
                     }
                 }.onFailure { fail("não consegui iniciar ${camera.id}: ${it.message}") }
@@ -134,60 +156,55 @@ class MultiCameraEngine(
             .onFailure { fail("não consegui configurar ${camera.id}: ${it.message}") }
     }
 
+    private fun scheduleStill(
+        camera: CameraDevice,
+        session: CameraCaptureSession,
+        source: Source,
+        activeGeneration: Int,
+        delayMillis: Long,
+    ) {
+        handler.postDelayed({
+            if (!running || generation != activeGeneration || sessions[camera.id] !== session) return@postDelayed
+            runCatching {
+                val physicalIds = source.physicalId?.let(::setOf).orEmpty()
+                val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalIds.isNotEmpty()) {
+                    camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE, physicalIds)
+                } else camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                builder.apply {
+                    addTarget(surfaces.getValue(source.id))
+                    set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                    set(CaptureRequest.JPEG_QUALITY, 92.toByte())
+                    set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                }
+                session.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: android.hardware.camera2.TotalCaptureResult,
+                    ) = scheduleStill(camera, session, source, activeGeneration, source.stillIntervalMillis)
+
+                    override fun onCaptureFailed(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        failure: android.hardware.camera2.CaptureFailure,
+                    ) {
+                        onStatus("Foto do placar falhou (${failure.reason}); tentando novamente")
+                        scheduleStill(camera, session, source, activeGeneration, source.stillIntervalMillis)
+                    }
+                }, handler)
+            }.onFailure {
+                onStatus("Foto do placar indisponível: ${it.message}")
+                scheduleStill(camera, session, source, activeGeneration, source.stillIntervalMillis)
+            }
+        }, delayMillis)
+    }
+
     private fun fpsRange(logicalId: String, fps: Int): Range<Int>? {
         if (fps <= 0) return null
         return manager.getCameraCharacteristics(logicalId)
             .get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             ?.filter { it.upper == fps }
             ?.minByOrNull { it.upper - it.lower }
-    }
-
-    private fun applyZooms(logicalId: String, sources: List<Source>, builder: CaptureRequest.Builder) {
-        val logical = manager.getCameraCharacteristics(logicalId)
-        val physicalKeys = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            runCatching { logical.availablePhysicalCameraRequestKeys }.getOrNull().orEmpty()
-        } else emptyList()
-        sources.filter { it.zoom > 1.001f }.forEach { source ->
-            val physicalId = source.physicalId
-            if (physicalId == null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val range = logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom))
-                }
-                return@forEach
-            }
-            val physical = manager.getCameraCharacteristics(physicalId)
-            when {
-                // O S22 anuncia CONTROL_ZOOM_RATIO por sensor e aceita o request, mas ignora a
-                // mudança em alguns sensores físicos durante multistream. SCALER_CROP_REGION é
-                // igualmente anunciado e descreve diretamente a área do sensor que deve gerar o
-                // buffer 1080p, portanto é a via determinística para a composição.
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && physicalKeys.contains(CaptureRequest.SCALER_CROP_REGION) -> {
-                    val active = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@forEach
-                    val maximum = physical.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: source.zoom
-                    builder.setPhysicalCameraKey(
-                        CaptureRequest.SCALER_CROP_REGION,
-                        centeredCrop(active, source.zoom.coerceAtMost(maximum)),
-                        physicalId,
-                    )
-                }
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && physicalKeys.contains(CaptureRequest.CONTROL_ZOOM_RATIO) -> {
-                    val range = physical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                        ?: logical.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-                    val value = source.zoom.coerceIn(range?.lower ?: 1f, range?.upper ?: source.zoom)
-                    builder.setPhysicalCameraKey(CaptureRequest.CONTROL_ZOOM_RATIO, value, physicalId)
-                }
-                else -> onStatus("Zoom independente indisponível para ${source.id}; mantendo 1,0×")
-            }
-        }
-    }
-
-    private fun centeredCrop(active: Rect, zoom: Float): Rect {
-        val width = ((active.width() / zoom).toInt().coerceAtLeast(2)) and -2
-        val height = ((active.height() / zoom).toInt().coerceAtLeast(2)) and -2
-        val left = active.left + (active.width() - width) / 2
-        val top = active.top + (active.height() - height) / 2
-        return Rect(left, top, left + width, top + height)
     }
 
     private fun fail(message: String) { running = false; onStatus("Captura múltipla indisponível: $message") }

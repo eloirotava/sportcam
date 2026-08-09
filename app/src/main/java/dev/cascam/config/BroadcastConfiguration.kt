@@ -7,6 +7,7 @@ data class BroadcastConfiguration(
     val courtCameraId: String = "",
     val scoreboardCameraId: String = "",
     val scoreboardEnabled: Boolean = true,
+    val scoreboardSource: ScoreboardSource = ScoreboardSource.VIDEO,
     val cropZoom: Float = 1f,
     val cropPanX: Float = 0f,
     val cropPanY: Float = 0f,
@@ -63,6 +64,17 @@ data class BroadcastConfiguration(
         OverlayLayer.CLOCK -> clockCameraId
     }.ifBlank { courtCameraId }
 
+    fun canUseScoreboardPhoto(): Boolean {
+        val scoreboard = cameraIdFor(OverlayLayer.SCOREBOARD)
+        return scoreboardEnabled && scoreboard != courtCameraId &&
+            (!clockEnabled || cameraIdFor(OverlayLayer.CLOCK) != scoreboard)
+    }
+
+    fun stillIntervalFor(cameraId: String): Long = if (
+        scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && canUseScoreboardPhoto() &&
+        cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId
+    ) 1_000L else 0L
+
     val requestedCaptureProfile: CaptureProfile?
         get() = if (captureWidth > 0 && captureHeight > 0 && captureFps > 0) {
             CaptureProfile(captureWidth, captureHeight, captureFps)
@@ -109,6 +121,11 @@ data class CaptureProfile(val width: Int, val height: Int, val fps: Int) {
 
 enum class OverlayLayer(val label: String) {
     SCOREBOARD("Placar"), CLOCK("Cronômetro"),
+}
+
+enum class ScoreboardSource(val label: String) {
+    VIDEO("Vídeo · acompanha movimento"),
+    PHOTO_EVERY_SECOND("Foto alta · 1 por segundo"),
 }
 
 enum class BroadcastProtocol(val label: String) { RTMPS("RTMPS"), HLS("HLS") }
