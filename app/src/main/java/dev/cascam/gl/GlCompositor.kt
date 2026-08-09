@@ -6,13 +6,16 @@ import android.graphics.SurfaceTexture
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
 import android.view.Surface
 import dev.cascam.config.BroadcastConfiguration
+import dev.cascam.config.ScoreboardSource
 import dev.cascam.geometry.NormalizedRect
 import dev.cascam.geometry.LogoGeometry
+import dev.cascam.geometry.StillFrameGeometry
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -51,6 +54,13 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     private var mapHandle = 0
     private var textureMatrixHandle = 0
     private var samplerHandle = 0
+    private var stillProgram = 0
+    private var stillUnitHandle = 0
+    private var stillDestHandle = 0
+    private var stillMapHandle = 0
+    private var stillSamplerHandle = 0
+    private val stillTextures = mutableMapOf<String, Int>()
+    private val stillSizes = mutableMapOf<String, Size>()
     private var courtTexture = 0
     private var scoreboardTexture = 0
     private var clockTexture = 0
@@ -101,6 +111,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 egl.setUp()
                 offscreen = egl.createOffscreenSurface().also(egl::makeCurrent)
                 program = buildProgram()
+                stillProgram = buildStillProgram()
                 courtTexture = createExternalTexture()
                 scoreboardTexture = createExternalTexture()
                 clockTexture = createExternalTexture()
@@ -136,6 +147,30 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
     fun setLogo(bitmap: Bitmap?) {
         requestedLogo = bitmap
         handler.post { if (ready) uploadLogo(bitmap) }
+    }
+
+    /** Atualiza a textura 2D do placar e conserva a foto até a captura seguinte. */
+    fun submitStill(sourceId: String, bitmap: Bitmap) {
+        handler.post {
+            try {
+                if (!ready) return@post
+                egl.makeCurrent(offscreen ?: return@post)
+                val texture = stillTextures[sourceId] ?: createBitmapTexture().also { stillTextures[sourceId] = it }
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+                val previous = stillSizes[sourceId]
+                if (previous?.width == bitmap.width && previous.height == bitmap.height) {
+                    GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+                } else {
+                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+                    stillSizes[sourceId] = Size(bitmap.width, bitmap.height)
+                }
+                render()
+            } catch (error: Throwable) {
+                onStatus("Falha ao atualizar foto do placar: ${error.message}")
+            } finally {
+                bitmap.recycle()
+            }
+        }
     }
 
     /** Ordem das texturas: quadra, auxiliar/placar e cronômetro distinto. */
@@ -177,6 +212,8 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             courtSurface?.release(); scoreboardSurface?.release(); clockSurface?.release()
             logoSurface?.release()
             courtStream?.release(); scoreboardStream?.release(); clockStream?.release(); logoStream?.release()
+            if (stillTextures.isNotEmpty()) GLES20.glDeleteTextures(stillTextures.size, stillTextures.values.toIntArray(), 0)
+            stillTextures.clear(); stillSizes.clear()
             courtSurface = null; scoreboardSurface = null; clockSurface = null
             courtStream = null; scoreboardStream = null; clockStream = null
             logoSurface = null; logoStream = null
@@ -235,7 +272,15 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val courtMap = Homography.multiply(rotation, Homography.unitSquareTo(crop.left, crop.top, crop.width, crop.height))
         val scoreboardSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
         val scoreboardRotation = Homography.inverseRotation(sourceRotations[scoreboardSource] ?: courtDegrees)
-        val scoreboardMap = Homography.multiply(scoreboardRotation, Homography.unitSquareTo(config.scoreboardCorners))
+        val stillSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
+        val stillSize = stillSizes[stillSource]
+        val stillCorners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillSize != null) {
+            StillFrameGeometry.fromVideoPreview(config.scoreboardCorners, stillSize.width, stillSize.height)
+        } else config.scoreboardCorners
+        // JPEG já foi girado como Bitmap na thread Camera2; SurfaceTexture ainda precisa do giro.
+        val scoreboardMap = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND) {
+            Homography.unitSquareTo(stillCorners)
+        } else Homography.multiply(scoreboardRotation, Homography.unitSquareTo(stillCorners))
         val clockSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
         val clockRotation = Homography.inverseRotation(sourceRotations[clockSource] ?: courtDegrees)
         val clockMap = Homography.multiply(clockRotation, Homography.unitSquareTo(config.clockCorners))
@@ -249,21 +294,28 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 GLES20.glViewport(0, 0, target.width, target.height)
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                GLES20.glUseProgram(program)
-                GLES20.glEnableVertexAttribArray(unitHandle)
-                vertices.position(0)
-                GLES20.glVertexAttribPointer(unitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
+                bindVideoProgram()
 
                 drawQuad(courtTexture, courtMatrix, courtMap, -1f, 1f, 1f, -1f)
                 if (config.scoreboardEnabled) {
-                    val scoreboardIndex = sourceIds.indexOf(config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD))
-                    drawQuad(
-                        when (scoreboardIndex) { 0 -> courtTexture; 2 -> clockTexture; else -> scoreboardTexture },
-                        when (scoreboardIndex) { 0 -> courtMatrix; 2 -> clockMatrix; else -> scoreboardMatrix },
-                        scoreboardMap,
-                        destination.left * 2f - 1f, 1f - destination.top * 2f,
-                        destination.right * 2f - 1f, 1f - destination.bottom * 2f,
-                    )
+                    val stillTexture = stillTextures[stillSource]
+                    if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillTexture != null) {
+                        drawStill(
+                            stillTexture, scoreboardMap,
+                            destination.left * 2f - 1f, 1f - destination.top * 2f,
+                            destination.right * 2f - 1f, 1f - destination.bottom * 2f,
+                        )
+                        bindVideoProgram()
+                    } else if (config.scoreboardSource == ScoreboardSource.VIDEO) {
+                        val scoreboardIndex = sourceIds.indexOf(stillSource)
+                        drawQuad(
+                            when (scoreboardIndex) { 0 -> courtTexture; 2 -> clockTexture; else -> scoreboardTexture },
+                            when (scoreboardIndex) { 0 -> courtMatrix; 2 -> clockMatrix; else -> scoreboardMatrix },
+                            scoreboardMap,
+                            destination.left * 2f - 1f, 1f - destination.top * 2f,
+                            destination.right * 2f - 1f, 1f - destination.bottom * 2f,
+                        )
+                    }
                 }
                 if (config.clockEnabled) {
                     val clockCamera = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
@@ -330,6 +382,28 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    private fun bindVideoProgram() {
+        GLES20.glUseProgram(program)
+        GLES20.glEnableVertexAttribArray(unitHandle)
+        vertices.position(0)
+        GLES20.glVertexAttribPointer(unitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
+    }
+
+    private fun drawStill(texture: Int, map: FloatArray, left: Float, top: Float, right: Float, bottom: Float) {
+        GLES20.glDisableVertexAttribArray(unitHandle)
+        GLES20.glUseProgram(stillProgram)
+        GLES20.glEnableVertexAttribArray(stillUnitHandle)
+        vertices.position(0)
+        GLES20.glVertexAttribPointer(stillUnitHandle, 2, GLES20.GL_FLOAT, false, 0, vertices)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
+        GLES20.glUniform1i(stillSamplerHandle, 0)
+        GLES20.glUniform4f(stillDestHandle, left, top, right, bottom)
+        GLES20.glUniformMatrix3fv(stillMapHandle, 1, false, map, 0)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(stillUnitHandle)
+    }
+
     private fun uploadLogo(bitmap: Bitmap?) {
         if (bitmap == null) {
             logoSize = null
@@ -362,6 +436,17 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         return ids[0]
     }
 
+    private fun createBitmapTexture(): Int {
+        val ids = IntArray(1)
+        GLES20.glGenTextures(1, ids, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        return ids[0]
+    }
+
     private fun buildProgram(): Int {
         val vertex = compile(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
         val fragment = compile(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER)
@@ -379,6 +464,25 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         mapHandle = GLES20.glGetUniformLocation(id, "uMap")
         textureMatrixHandle = GLES20.glGetUniformLocation(id, "uTextureMatrix")
         samplerHandle = GLES20.glGetUniformLocation(id, "sTexture")
+        return id
+    }
+
+    private fun buildStillProgram(): Int {
+        val vertex = compile(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
+        val fragment = compile(GLES20.GL_FRAGMENT_SHADER, STILL_FRAGMENT_SHADER)
+        val id = GLES20.glCreateProgram()
+        GLES20.glAttachShader(id, vertex)
+        GLES20.glAttachShader(id, fragment)
+        GLES20.glLinkProgram(id)
+        val status = IntArray(1)
+        GLES20.glGetProgramiv(id, GLES20.GL_LINK_STATUS, status, 0)
+        check(status[0] == GLES20.GL_TRUE) { "link do shader de foto falhou: ${GLES20.glGetProgramInfoLog(id)}" }
+        GLES20.glDeleteShader(vertex)
+        GLES20.glDeleteShader(fragment)
+        stillUnitHandle = GLES20.glGetAttribLocation(id, "aUnit")
+        stillDestHandle = GLES20.glGetUniformLocation(id, "uDest")
+        stillMapHandle = GLES20.glGetUniformLocation(id, "uMap")
+        stillSamplerHandle = GLES20.glGetUniformLocation(id, "sTexture")
         return id
     }
 
@@ -417,6 +521,18 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 vec2 image = mapped.xy / mapped.z;
                 vec4 coordinate = uTextureMatrix * vec4(image.x, 1.0 - image.y, 0.0, 1.0);
                 gl_FragColor = texture2D(sTexture, coordinate.xy);
+            }
+        """.trimIndent()
+
+        val STILL_FRAGMENT_SHADER = """
+            precision mediump float;
+            varying vec2 vUnit;
+            uniform mat3 uMap;
+            uniform sampler2D sTexture;
+            void main() {
+                vec3 mapped = uMap * vec3(vUnit, 1.0);
+                vec2 image = mapped.xy / mapped.z;
+                gl_FragColor = texture2D(sTexture, vec2(image.x, 1.0 - image.y));
             }
         """.trimIndent()
     }

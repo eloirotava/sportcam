@@ -5,6 +5,7 @@ import dev.cascam.config.CaptureProfile
 import dev.cascam.config.CaptureSettings
 import dev.cascam.config.OverlayLayer
 import dev.cascam.config.OutputResolution
+import dev.cascam.config.ScoreboardSource
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraInfo
 import dev.cascam.camera.LensFacing
@@ -59,6 +60,29 @@ class CompositionGeometryTest {
         assertEquals(255, WhiteTransparency.applyToColor(0xffff0000.toInt()) ushr 24)
         val feathered = WhiteTransparency.applyToColor(0xfff0f0f0.toInt()) ushr 24
         assertEquals(true, feathered in 1..254)
+    }
+
+    @Test fun `video corners map into centered crop of four by three photo`() {
+        val mapped = StillFrameGeometry.fromVideoPreview(
+            listOf(NormalizedPoint(0f, 0f), NormalizedPoint(1f, 0f), NormalizedPoint(1f, 1f), NormalizedPoint(0f, 1f)),
+            3648, 2736,
+        )
+
+        assertEquals(.125f, mapped.first().y, .0001f)
+        assertEquals(.875f, mapped[2].y, .0001f)
+        assertEquals(0f, mapped.first().x, .0001f)
+        assertEquals(1f, mapped[2].x, .0001f)
+    }
+
+    @Test fun `photo source requires a camera dedicated to scoreboard`() {
+        val dedicated = BroadcastConfiguration(
+            courtCameraId = "wide", scoreboardCameraId = "tele",
+            scoreboardSource = ScoreboardSource.PHOTO_EVERY_SECOND,
+        )
+        val shared = dedicated.copy(scoreboardCameraId = "wide")
+
+        assertEquals(1_000L, dedicated.stillIntervalFor("tele"))
+        assertEquals(0L, shared.stillIntervalFor("wide"))
     }
 
     @Test fun `shared overlay sources open a camera only once`() {

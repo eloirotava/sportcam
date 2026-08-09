@@ -107,3 +107,16 @@ object WhiteTransparency {
 
     private const val FEATHER = 30
 }
+
+object StillFrameGeometry {
+    /** Converte pontos marcados no preview 16:9 para o JPEG cheio, normalmente 4:3. */
+    fun fromVideoPreview(corners: List<NormalizedPoint>, stillWidth: Int, stillHeight: Int): List<NormalizedPoint> {
+        val videoCrop = NormalizedRect.centered16x9(stillWidth, stillHeight)
+        return corners.map { point ->
+            NormalizedPoint(
+                videoCrop.left + point.x * videoCrop.width,
+                videoCrop.top + point.y * videoCrop.height,
+            )
+        }
+    }
+}
