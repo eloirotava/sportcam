@@ -84,6 +84,14 @@ class CompositionGeometryTest {
         assertEquals(.75f, bottomRight.y, .0001f)
     }
 
+    @Test fun `scoreboard geometry accepts twenty times digital zoom`() {
+        val topLeft = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(0f, 0f), 20f)
+        val bottomRight = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(1f, 1f), 20f)
+
+        assertEquals(.5f - .5f / 20f, topLeft.x, .0001f)
+        assertEquals(.5f + .5f / 20f, bottomRight.x, .0001f)
+    }
+
     @Test fun `photo mapping combines sixteen by nine crop and preview zoom`() {
         val mapped = StillFrameGeometry.fromVideoPreview(
             listOf(NormalizedPoint(0f, 0f)), 3648, 2736, 2f,
@@ -211,6 +219,16 @@ class CompositionGeometryTest {
         )
 
         assertEquals(5f, configuration.resolvedCaptureZoom("shared"))
+    }
+
+    @Test fun `scoreboard capture zoom is preserved up to twenty times`() {
+        val configuration = BroadcastConfiguration(
+            courtCameraId = "wide",
+            scoreboardCameraId = "tele",
+            scoreboardCaptureZoom = 20f,
+        )
+
+        assertEquals(20f, configuration.resolvedCaptureZoom("tele"))
     }
 
     @Test fun `simultaneous support follows logical camera groups`() {

@@ -193,7 +193,7 @@ class MainActivity : AppCompatActivity() {
         updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.SCOREBOARD), OverlayLayer.SCOREBOARD, configuration.scoreboardCaptureWidth to configuration.scoreboardCaptureHeight, configuration.scoreboardCaptureFps)
         updateCaptureOptions(configuration.cameraIdFor(OverlayLayer.CLOCK), OverlayLayer.CLOCK, configuration.clockCaptureWidth to configuration.clockCaptureHeight, configuration.clockCaptureFps)
         binding.courtCaptureZoom.progress = zoomProgress(configuration.captureZoom)
-        binding.scoreboardCaptureZoom.progress = zoomProgress(configuration.scoreboardCaptureZoom)
+        binding.scoreboardCaptureZoom.progress = zoomProgress(configuration.scoreboardCaptureZoom, SCOREBOARD_MAX_ZOOM)
         binding.clockCaptureZoom.progress = zoomProgress(configuration.clockCaptureZoom)
         binding.broadcastProtocol.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, BroadcastProtocol.entries.map { it.label })
         binding.broadcastProtocol.setSelection(BroadcastProtocol.entries.indexOf(configuration.protocol))
@@ -553,7 +553,7 @@ class MainActivity : AppCompatActivity() {
             scoreboardCaptureWidth = scoreboardCaptureSize.first,
             scoreboardCaptureHeight = scoreboardCaptureSize.second,
             scoreboardCaptureFps = scoreboardCaptureFpsOptions.getOrElse(binding.scoreboardCaptureFps.selectedItemPosition) { 0 },
-            scoreboardCaptureZoom = captureZoom(binding.scoreboardCaptureZoom.progress),
+            scoreboardCaptureZoom = captureZoom(binding.scoreboardCaptureZoom.progress, SCOREBOARD_MAX_ZOOM),
             clockCaptureWidth = clockCaptureSize.first,
             clockCaptureHeight = clockCaptureSize.second,
             clockCaptureFps = clockCaptureFpsOptions.getOrElse(binding.clockCaptureFps.selectedItemPosition) { 0 },
@@ -1040,7 +1040,7 @@ class MainActivity : AppCompatActivity() {
         val output = OutputResolution.entries.getOrNull(binding.outputResolution.selectedItemPosition) ?: OutputResolution.HD
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
         binding.courtCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.courtCaptureZoom.progress))
-        binding.scoreboardCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
+        binding.scoreboardCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.scoreboardCaptureZoom.progress, SCOREBOARD_MAX_ZOOM))
         binding.clockCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.clockCaptureZoom.progress))
     }
 
@@ -1109,8 +1109,11 @@ class MainActivity : AppCompatActivity() {
         updateZoomLabels()
     }
 
-    private fun captureZoom(progress: Int): Float = 1f + progress.coerceIn(0, 70) / 10f
-    private fun zoomProgress(zoom: Float): Int = ((zoom.coerceIn(1f, 8f) - 1f) * 10f).toInt()
+    private fun captureZoom(progress: Int, maximum: Float = 8f): Float =
+        1f + progress.coerceIn(0, ((maximum - 1f) * 10f).toInt()) / 10f
+
+    private fun zoomProgress(zoom: Float, maximum: Float = 8f): Int =
+        ((zoom.coerceIn(1f, maximum) - 1f) * 10f).toInt()
     private fun hasCameraPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     private fun requestCameraIfNeeded() {
@@ -1135,7 +1138,7 @@ class MainActivity : AppCompatActivity() {
             )
             val previewZoom = when (screen) {
                 Screen.COURT -> captureZoom(binding.courtCaptureZoom.progress)
-                Screen.SCOREBOARD -> captureZoom(binding.scoreboardCaptureZoom.progress)
+                Screen.SCOREBOARD -> captureZoom(binding.scoreboardCaptureZoom.progress, SCOREBOARD_MAX_ZOOM)
                 Screen.CLOCK -> captureZoom(binding.clockCaptureZoom.progress)
                 else -> 1f
             }
@@ -1572,5 +1575,6 @@ class MainActivity : AppCompatActivity() {
         /** Teto de captura dos dois sensores; o teste confirmou 1920x1080 neste aparelho. */
         val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
         val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
+        const val SCOREBOARD_MAX_ZOOM = 20f
     }
 }

@@ -131,7 +131,7 @@ object StillFrameGeometry {
 /** Recorte central previsível, independente de o HAL respeitar zoom por sensor físico. */
 object CaptureZoomGeometry {
     fun fromZoomedPreview(point: NormalizedPoint, zoom: Float): NormalizedPoint {
-        val safeZoom = zoom.coerceIn(1f, 8f)
+        val safeZoom = zoom.coerceIn(1f, 20f)
         return NormalizedPoint(
             .5f + (point.x - .5f) / safeZoom,
             .5f + (point.y - .5f) / safeZoom,
