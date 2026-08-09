@@ -3,9 +3,7 @@ package dev.cascam.camera
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.BitmapRegionDecoder
 import android.graphics.ImageFormat
-import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
@@ -20,7 +18,6 @@ import android.os.Build
 import android.util.Range
 import android.util.Size
 import android.view.Surface
-import dev.cascam.geometry.StillFrameGeometry
 import java.util.concurrent.Executor
 
 /**
@@ -30,7 +27,7 @@ import java.util.concurrent.Executor
  */
 class MultiCameraEngine(
     private val manager: CameraManager,
-    private val onFrame: (cameraId: String, Bitmap, StillFrameGeometry.DecodeRegion?) -> Unit,
+    private val onFrame: (cameraId: String, Bitmap) -> Unit,
     private val onStatus: (String) -> Unit,
 ) {
     data class Source(
@@ -41,7 +38,6 @@ class MultiCameraEngine(
         val fps: Int,
         val zoom: Float = 1f,
         val stillIntervalMillis: Long = 0L,
-        val stillDecodeRegion: StillFrameGeometry.DecodeRegion? = null,
     ) {
         val isStill: Boolean get() = stillIntervalMillis > 0L
     }
@@ -87,9 +83,9 @@ class MultiCameraEngine(
                                 val jpeg = ByteArray(buffer.remaining()).also(buffer::get)
                                 // JPEG é entregue na orientação correta pelo HAL. A correção
                                 // manual da GPU pertence exclusivamente aos SurfaceTextures de vídeo.
-                                decodeStill(jpeg, source.stillDecodeRegion)
+                                requireNotNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size))
                             } else YuvFrameConverter.convert(image, source.size.width, rotations[source.id] ?: 0)
-                            onFrame(source.id, bitmap, source.stillDecodeRegion)
+                            onFrame(source.id, bitmap)
                         }.onFailure { onStatus("Falha ao converter ${source.id}: ${it.message}") }
                     } finally { image.close() }
                 }, handler)
@@ -210,21 +206,6 @@ class MultiCameraEngine(
 
     private fun effectiveStillInterval(source: Source): Long =
         maxOf(source.stillIntervalMillis, thermalStillMinimumIntervalMillis)
-
-    private fun decodeStill(jpeg: ByteArray, region: StillFrameGeometry.DecodeRegion?): Bitmap {
-        if (region == null) return requireNotNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size))
-        val decoder = BitmapRegionDecoder.newInstance(jpeg, 0, jpeg.size, false)
-        return try {
-            requireNotNull(
-                decoder.decodeRegion(
-                    Rect(region.left, region.top, region.right, region.bottom),
-                    BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
-                ),
-            )
-        } finally {
-            decoder.recycle()
-        }
-    }
 
     private fun fpsRange(logicalId: String, fps: Int): Range<Int>? {
         if (fps <= 0) return null

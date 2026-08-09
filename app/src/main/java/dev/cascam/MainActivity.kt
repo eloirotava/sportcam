@@ -70,7 +70,6 @@ import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
 import dev.cascam.geometry.WhiteTransparency
-import dev.cascam.geometry.StillFrameGeometry
 import dev.cascam.stream.YoutubePublisher
 import java.io.IOException
 import kotlin.math.atan2
@@ -1264,9 +1263,6 @@ class MainActivity : AppCompatActivity() {
             val stillInterval = configuration.stillIntervalFor(id)
             val size = if (stillInterval > 0L) camera.maximumJpegSize ?: return@let null
             else captureSizeFor(configuration, id)
-            val decodeRegion = if (stillInterval > 0L) StillFrameGeometry.decodeRegion(
-                configuration.scoreboardCorners, size.width, size.height, configuration.scoreboardCaptureZoom,
-            ) else null
             MultiCameraEngine.Source(
                 id = id,
                 logicalId = camera.logicalCameraId,
@@ -1275,14 +1271,13 @@ class MainActivity : AppCompatActivity() {
                 fps = settings.fps,
                 zoom = configuration.resolvedCaptureZoom(id),
                 stillIntervalMillis = stillInterval,
-                stillDecodeRegion = decodeRegion,
             )
         } }
         if (sources.size != ids.size) return
         val rotations = sources.associate { it.id to if (it.isStill) 0 else rotationFor(it.logicalId) }
         val engine = multiCameraEngine ?: MultiCameraEngine(
             getSystemService(CameraManager::class.java),
-            onFrame = { id, bitmap, region -> deliverCompositionFrame(id, bitmap, region) },
+            onFrame = { id, bitmap -> deliverCompositionFrame(id, bitmap) },
             onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
         ).also { multiCameraEngine = it }
         engine.setThermalStillMinimumInterval(thermalPhotoMinimumIntervalMillis)
@@ -1324,15 +1319,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun deliverCompositionFrame(
-        id: String,
-        bitmap: Bitmap,
-        stillRegion: StillFrameGeometry.DecodeRegion? = null,
-    ) {
+    private fun deliverCompositionFrame(id: String, bitmap: Bitmap) {
         val configuration = compositionConfiguration
         if (configuration.stillIntervalFor(id) > 0L && configuration.compositionEngine == CompositionEngine.GPU) {
             val active = compositor
-            if (active?.isReady == true) active.submitStill(id, bitmap, stillRegion) else bitmap.recycle()
+            if (active?.isReady == true) active.submitStill(id, bitmap) else bitmap.recycle()
         } else submitSourceFrame(id, bitmap, configuration)
     }
 

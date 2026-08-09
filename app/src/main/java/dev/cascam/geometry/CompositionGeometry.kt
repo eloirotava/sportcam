@@ -109,24 +109,6 @@ object WhiteTransparency {
 }
 
 object StillFrameGeometry {
-    data class DecodeRegion(
-        val left: Int,
-        val top: Int,
-        val right: Int,
-        val bottom: Int,
-        val fullWidth: Int,
-        val fullHeight: Int,
-    ) {
-        val width: Int get() = right - left
-        val height: Int get() = bottom - top
-
-        init {
-            require(fullWidth > 0 && fullHeight > 0)
-            require(left in 0 until right && top in 0 until bottom)
-            require(right <= fullWidth && bottom <= fullHeight)
-        }
-    }
-
     /** Converte pontos marcados no preview 16:9 para o JPEG cheio, normalmente 4:3. */
     fun fromVideoPreview(
         corners: List<NormalizedPoint>,
@@ -144,43 +126,6 @@ object StillFrameGeometry {
         }
     }
 
-    /** Retângulo mínimo do JPEG que contém o quadrilátero, com margem para filtragem nas bordas. */
-    fun decodeRegion(
-        corners: List<NormalizedPoint>,
-        stillWidth: Int,
-        stillHeight: Int,
-        previewZoom: Float = 1f,
-        paddingFraction: Float = .08f,
-    ): DecodeRegion {
-        require(corners.size == 4)
-        require(paddingFraction in 0f..1f)
-        val mapped = fromVideoPreview(corners, stillWidth, stillHeight, previewZoom)
-        val minimumX = mapped.minOf { it.x } * stillWidth
-        val maximumX = mapped.maxOf { it.x } * stillWidth
-        val minimumY = mapped.minOf { it.y } * stillHeight
-        val maximumY = mapped.maxOf { it.y } * stillHeight
-        val paddingX = maxOf(8f, (maximumX - minimumX) * paddingFraction)
-        val paddingY = maxOf(8f, (maximumY - minimumY) * paddingFraction)
-        val left = kotlin.math.floor(minimumX - paddingX).toInt().coerceIn(0, stillWidth - 1)
-        val top = kotlin.math.floor(minimumY - paddingY).toInt().coerceIn(0, stillHeight - 1)
-        val right = kotlin.math.ceil(maximumX + paddingX).toInt().coerceIn(left + 1, stillWidth)
-        val bottom = kotlin.math.ceil(maximumY + paddingY).toInt().coerceIn(top + 1, stillHeight)
-        return DecodeRegion(left, top, right, bottom, stillWidth, stillHeight)
-    }
-
-    /** Renormaliza os cantos do JPEG cheio para a textura produzida pelo decoder regional. */
-    fun fromVideoPreviewToRegion(
-        corners: List<NormalizedPoint>,
-        region: DecodeRegion,
-        previewZoom: Float = 1f,
-    ): List<NormalizedPoint> = fromVideoPreview(
-        corners, region.fullWidth, region.fullHeight, previewZoom,
-    ).map { point ->
-        NormalizedPoint(
-            ((point.x * region.fullWidth - region.left) / region.width).coerceIn(0f, 1f),
-            ((point.y * region.fullHeight - region.top) / region.height).coerceIn(0f, 1f),
-        )
-    }
 }
 
 /** Recorte central previsível, independente de o HAL respeitar zoom por sensor físico. */

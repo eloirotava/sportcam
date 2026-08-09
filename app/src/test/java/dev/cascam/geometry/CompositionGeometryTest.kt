@@ -105,24 +105,6 @@ class CompositionGeometryTest {
         assertEquals(10_000L, dedicated.copy(scoreboardPhotoIntervalMillis = 10_000L).stillIntervalFor("tele"))
     }
 
-    @Test fun `regional photo decode preserves the four configured corners`() {
-        val corners = listOf(
-            NormalizedPoint(.62f, .08f), NormalizedPoint(.94f, .1f),
-            NormalizedPoint(.92f, .31f), NormalizedPoint(.6f, .29f),
-        )
-        val full = StillFrameGeometry.fromVideoPreview(corners, 3648, 2736, 2f)
-        val region = StillFrameGeometry.decodeRegion(corners, 3648, 2736, 2f)
-        val local = StillFrameGeometry.fromVideoPreviewToRegion(corners, region, 2f)
-
-        full.zip(local).forEach { (expected, point) ->
-            val reconstructedX = (region.left + point.x * region.width) / region.fullWidth
-            val reconstructedY = (region.top + point.y * region.height) / region.fullHeight
-            assertEquals(expected.x, reconstructedX, .0001f)
-            assertEquals(expected.y, reconstructedY, .0001f)
-        }
-        assert(region.width.toLong() * region.height < region.fullWidth.toLong() * region.fullHeight / 4L)
-    }
-
     @Test fun `shared overlay sources open a camera only once`() {
         val configuration = BroadcastConfiguration(
             courtCameraId = "wide",
