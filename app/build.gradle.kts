@@ -17,15 +17,6 @@ android {
         versionName = "0.0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    buildTypes {
-        getByName("debug") {
-            // Prévias desta branch instalam ao lado da SportCam estável, mesmo que o runner do
-            // GitHub gere outra chave debug. Isso também preserva preferências e credenciais.
-            applicationIdSuffix = ".phototest"
-            versionNameSuffix = "-photo-test"
-        }
-    }
-
     buildFeatures { viewBinding = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

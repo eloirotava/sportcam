@@ -533,6 +533,8 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             }
         """.trimIndent()
 
+        // GLUtils preserva a orientação vertical do Bitmap. Ao contrário da SurfaceTexture de
+        // vídeo, a textura 2D do JPEG deve ser amostrada sem inverter o eixo Y.
         val STILL_FRAGMENT_SHADER = """
             precision mediump float;
             varying vec2 vUnit;
@@ -541,7 +543,7 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
             void main() {
                 vec3 mapped = uMap * vec3(vUnit, 1.0);
                 vec2 image = mapped.xy / mapped.z;
-                gl_FragColor = texture2D(sTexture, vec2(image.x, 1.0 - image.y));
+                gl_FragColor = texture2D(sTexture, image);
             }
         """.trimIndent()
     }
