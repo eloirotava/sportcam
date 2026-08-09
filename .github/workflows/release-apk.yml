@@ -1,6 +1,9 @@
 name: Release APK
 
 on:
+  push:
+    tags:
+      - "v*-test.*"
   workflow_dispatch:
     inputs:
       version:
@@ -16,6 +19,9 @@ on:
 
 permissions:
   contents: write
+
+env:
+  RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
   build-and-release:
@@ -48,17 +54,17 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "SportCam-${{ inputs.version }}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "SportCam-${{ env.RELEASE_VERSION }}-debug.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "SportCam-latest-debug.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ inputs.version }}"
-          name: "SportCam v${{ inputs.version }}"
-          prerelease: ${{ inputs.prerelease }}
-          make_latest: ${{ inputs.prerelease && 'false' || 'true' }}
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+          name: SportCam ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+          prerelease: ${{ github.event_name == 'push' || inputs.prerelease }}
+          make_latest: ${{ (github.event_name == 'push' || inputs.prerelease) && 'false' || 'true' }}
           generate_release_notes: true
           files: |
-            SportCam-${{ inputs.version }}-debug.apk
+            SportCam-${{ env.RELEASE_VERSION }}-debug.apk
             SportCam-latest-debug.apk
