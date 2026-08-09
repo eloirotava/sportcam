@@ -46,6 +46,7 @@ import dev.cascam.camera.CameraXSupport
 import dev.cascam.camera.DualCameraEngine
 import dev.cascam.camera.DualCameraProbe
 import dev.cascam.camera.MultiCameraEngine
+import dev.cascam.camera.PhotoScoreboardProbe
 import dev.cascam.config.CompositionEngine
 import dev.cascam.config.FrameRotation
 import dev.cascam.config.OverlayLayer
@@ -99,6 +100,8 @@ class MainActivity : AppCompatActivity() {
     private var deviceAuthorization: YoutubeLiveApi.DeviceAuthorization? = null
     private var probe: DualCameraProbe? = null
     private var probeReport: String = ""
+    private var photoProbe: PhotoScoreboardProbe? = null
+    private var photoProbeReport: String = ""
     private var ingestion: YoutubeLiveApi.Ingestion? = null
     private var dualCameraEngine: DualCameraEngine? = null
     private var multiCameraEngine: MultiCameraEngine? = null
@@ -238,6 +241,8 @@ class MainActivity : AppCompatActivity() {
         binding.navDiagnostics.setOnClickListener { showScreen(Screen.DIAGNOSTICS) }
         binding.runProbe.setOnClickListener { toggleProbe() }
         binding.copyProbeReport.setOnClickListener { copyProbeReport() }
+        binding.runPhotoProbe.setOnClickListener { togglePhotoProbe() }
+        binding.copyPhotoProbeReport.setOnClickListener { copyPhotoProbeReport() }
         binding.saveButton.setOnClickListener { saveConfiguration(); toast("Configuração salva") }
         binding.startButton.setOnClickListener { toggleBroadcast() }
         binding.authorizeYoutube.setOnClickListener { authorizeYoutube() }
@@ -375,7 +380,7 @@ class MainActivity : AppCompatActivity() {
     private fun showScreen(target: Screen) {
         if (target != Screen.BROADCAST && publisher != null) stopBroadcast()
         if (target != Screen.BROADCAST) { dualCameraEngine?.stop(); multiCameraEngine?.stop(); releaseCompositor() }
-        if (target != Screen.DIAGNOSTICS) stopProbe()
+        if (target != Screen.DIAGNOSTICS) { stopProbe(); stopPhotoProbe() }
         if (target == Screen.COURT) startLevelSensor() else stopLevelSensor()
         screen = target
         binding.panelBroadcast.visibility = if (target == Screen.BROADCAST) View.VISIBLE else View.GONE
@@ -698,6 +703,7 @@ class MainActivity : AppCompatActivity() {
     private fun toggleProbe() {
         if (probe?.isRunning == true) { stopProbe(); return }
         if (!hasCameraPermission()) { requestCameraIfNeeded(); return }
+        stopPhotoProbe()
         binding.probeReport.text = ""
         probeReport = ""
         binding.copyProbeReport.isEnabled = false
@@ -730,6 +736,53 @@ class MainActivity : AppCompatActivity() {
         if (clipboard == null) { toast("Área de transferência indisponível"); return }
         clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico de câmeras SportCam", probeReport))
         toast("Relatório copiado")
+    }
+
+    private fun togglePhotoProbe() {
+        if (photoProbe?.isRunning == true) { stopPhotoProbe(); return }
+        if (!hasCameraPermission()) { requestCameraIfNeeded(); return }
+        val court = cameraFor(cameraIds.getOrNull(binding.courtCamera.selectedItemPosition).orEmpty())
+        val scoreboard = cameraFor(cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition).orEmpty())
+        if (court == null || scoreboard == null) { toast("Selecione as câmeras da quadra e do placar primeiro"); return }
+        stopProbe()
+        binding.photoProbeReport.text = ""
+        binding.photoProbeStatus.text = "Liberando as câmeras para o teste…"
+        photoProbeReport = ""
+        binding.copyPhotoProbeReport.isEnabled = false
+        binding.runPhotoProbe.text = "■ PARAR TESTE GPU + FOTO"
+        val created = PhotoScoreboardProbe(
+            manager = getSystemService(CameraManager::class.java),
+            onProgress = { message -> runOnUiThread { binding.photoProbeStatus.text = message } },
+            onReport = { report ->
+                runOnUiThread {
+                    photoProbeReport = report
+                    binding.photoProbeReport.text = report
+                    binding.copyPhotoProbeReport.isEnabled = report.isNotBlank()
+                    binding.runPhotoProbe.text = "▶ TESTAR GPU + FOTO"
+                    photoProbe = null
+                }
+            },
+        )
+        photoProbe = created
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            runCatching { future.get().unbindAll() }
+            if (photoProbe === created) created.start(court, scoreboard)
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun stopPhotoProbe() {
+        photoProbe?.shutdown()
+        photoProbe = null
+        binding.runPhotoProbe.text = "▶ TESTAR GPU + FOTO"
+    }
+
+    private fun copyPhotoProbeReport() {
+        if (photoProbeReport.isBlank()) { toast("Rode o teste GPU + foto primeiro"); return }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        if (clipboard == null) { toast("Área de transferência indisponível"); return }
+        clipboard.setPrimaryClip(ClipData.newPlainText("Diagnóstico GPU + foto SportCam", photoProbeReport))
+        toast("Relatório GPU + foto copiado")
     }
 
     /** Sem filtro do app: o YouTube decide se aceita a combinação, e a recusa aparece na tela. */
@@ -1361,6 +1414,8 @@ class MainActivity : AppCompatActivity() {
         stopLevelSensor()
         probe?.shutdown()
         probe = null
+        photoProbe?.shutdown()
+        photoProbe = null
         dualCameraEngine?.release()
         dualCameraEngine = null
         multiCameraEngine?.release()

@@ -190,6 +190,12 @@
                     <TextView android:id="@+id/probe_status" style="@style/PanelHint" android:text="Nenhum teste executado ainda." />
                     <Button android:id="@+id/copy_probe_report" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="COPIAR RELATÓRIO" android:enabled="false" />
                     <TextView android:id="@+id/probe_report" style="@style/ProbeReport" android:text="O relatório aparece aqui." />
+                    <TextView style="@style/PanelTitle" android:layout_marginTop="18dp" android:text="Teste conclusivo GPU + foto" />
+                    <TextView style="@style/PanelText" android:text="Usa as câmeras escolhidas nas abas QUADRA e PLACAR. Mantém a quadra em uma SurfaceTexture OpenGL real e tira três fotos do placar, uma por segundo. Só aprova se a foto vier cheia e o vídeo não parar." />
+                    <Button android:id="@+id/run_photo_probe" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="▶ TESTAR GPU + FOTO" />
+                    <TextView android:id="@+id/photo_probe_status" style="@style/PanelHint" android:text="Selecione dois sensores físicos e execute o teste." />
+                    <Button android:id="@+id/copy_photo_probe_report" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="COPIAR RELATÓRIO GPU + FOTO" android:enabled="false" />
+                    <TextView android:id="@+id/photo_probe_report" style="@style/ProbeReport" android:text="O relatório específico aparece aqui." />
                 </LinearLayout>
             </FrameLayout>
         </ScrollView>
