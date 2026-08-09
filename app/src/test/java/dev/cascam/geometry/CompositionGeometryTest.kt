@@ -74,6 +74,25 @@ class CompositionGeometryTest {
         assertEquals(1f, mapped[2].x, .0001f)
     }
 
+    @Test fun `capture zoom maps preview coordinates into centered source crop`() {
+        val topLeft = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(0f, 0f), 2f)
+        val bottomRight = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(1f, 1f), 2f)
+
+        assertEquals(.25f, topLeft.x, .0001f)
+        assertEquals(.25f, topLeft.y, .0001f)
+        assertEquals(.75f, bottomRight.x, .0001f)
+        assertEquals(.75f, bottomRight.y, .0001f)
+    }
+
+    @Test fun `photo mapping combines sixteen by nine crop and preview zoom`() {
+        val mapped = StillFrameGeometry.fromVideoPreview(
+            listOf(NormalizedPoint(0f, 0f)), 3648, 2736, 2f,
+        ).single()
+
+        assertEquals(.25f, mapped.x, .0001f)
+        assertEquals(.3125f, mapped.y, .0001f)
+    }
+
     @Test fun `photo source requires a camera dedicated to scoreboard`() {
         val dedicated = BroadcastConfiguration(
             courtCameraId = "wide", scoreboardCameraId = "tele",

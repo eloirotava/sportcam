@@ -110,13 +110,36 @@ object WhiteTransparency {
 
 object StillFrameGeometry {
     /** Converte pontos marcados no preview 16:9 para o JPEG cheio, normalmente 4:3. */
-    fun fromVideoPreview(corners: List<NormalizedPoint>, stillWidth: Int, stillHeight: Int): List<NormalizedPoint> {
+    fun fromVideoPreview(
+        corners: List<NormalizedPoint>,
+        stillWidth: Int,
+        stillHeight: Int,
+        previewZoom: Float = 1f,
+    ): List<NormalizedPoint> {
         val videoCrop = NormalizedRect.centered16x9(stillWidth, stillHeight)
         return corners.map { point ->
+            val unzoomed = CaptureZoomGeometry.fromZoomedPreview(point, previewZoom)
             NormalizedPoint(
-                videoCrop.left + point.x * videoCrop.width,
-                videoCrop.top + point.y * videoCrop.height,
+                videoCrop.left + unzoomed.x * videoCrop.width,
+                videoCrop.top + unzoomed.y * videoCrop.height,
             )
         }
+    }
+}
+
+/** Recorte central previsível, independente de o HAL respeitar zoom por sensor físico. */
+object CaptureZoomGeometry {
+    fun fromZoomedPreview(point: NormalizedPoint, zoom: Float): NormalizedPoint {
+        val safeZoom = zoom.coerceIn(1f, 8f)
+        return NormalizedPoint(
+            .5f + (point.x - .5f) / safeZoom,
+            .5f + (point.y - .5f) / safeZoom,
+        )
+    }
+
+    fun fromZoomedPreview(rect: NormalizedRect, zoom: Float): NormalizedRect {
+        val topLeft = fromZoomedPreview(NormalizedPoint(rect.left, rect.top), zoom)
+        val bottomRight = fromZoomedPreview(NormalizedPoint(rect.right, rect.bottom), zoom)
+        return NormalizedRect(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y)
     }
 }

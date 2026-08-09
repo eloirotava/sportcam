@@ -16,6 +16,7 @@ import dev.cascam.config.ScoreboardSource
 import dev.cascam.geometry.NormalizedRect
 import dev.cascam.geometry.LogoGeometry
 import dev.cascam.geometry.StillFrameGeometry
+import dev.cascam.geometry.CaptureZoomGeometry
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -268,22 +269,30 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val quarterTurn = (courtDegrees % 180 != 0) != streamSwapsAxes(courtMatrix)
         val cropWidth = if (quarterTurn) captureSize.height else captureSize.width
         val cropHeight = if (quarterTurn) captureSize.width else captureSize.height
-        val crop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
+        val configuredCrop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
+        val crop = CaptureZoomGeometry.fromZoomedPreview(configuredCrop, config.captureZoom)
         val courtMap = Homography.multiply(rotation, Homography.unitSquareTo(crop.left, crop.top, crop.width, crop.height))
         val scoreboardSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
         val scoreboardRotation = Homography.inverseRotation(sourceRotations[scoreboardSource] ?: courtDegrees)
         val stillSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
         val stillSize = stillSizes[stillSource]
         val stillCorners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillSize != null) {
-            StillFrameGeometry.fromVideoPreview(config.scoreboardCorners, stillSize.width, stillSize.height)
-        } else config.scoreboardCorners
-        // JPEG já foi girado como Bitmap na thread Camera2; SurfaceTexture ainda precisa do giro.
+            StillFrameGeometry.fromVideoPreview(
+                config.scoreboardCorners, stillSize.width, stillSize.height, config.scoreboardCaptureZoom,
+            )
+        } else config.scoreboardCorners.map { point ->
+            CaptureZoomGeometry.fromZoomedPreview(point, config.scoreboardCaptureZoom)
+        }
+        // JPEG não recebe a correção manual; ela pertence apenas ao vídeo em SurfaceTexture.
         val scoreboardMap = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND) {
             Homography.unitSquareTo(stillCorners)
         } else Homography.multiply(scoreboardRotation, Homography.unitSquareTo(stillCorners))
         val clockSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
         val clockRotation = Homography.inverseRotation(sourceRotations[clockSource] ?: courtDegrees)
-        val clockMap = Homography.multiply(clockRotation, Homography.unitSquareTo(config.clockCorners))
+        val clockCorners = config.clockCorners.map { point ->
+            CaptureZoomGeometry.fromZoomedPreview(point, config.clockCaptureZoom)
+        }
+        val clockMap = Homography.multiply(clockRotation, Homography.unitSquareTo(clockCorners))
         val destination = config.scoreboardDestination
         val clockDestination = config.clockDestination
 

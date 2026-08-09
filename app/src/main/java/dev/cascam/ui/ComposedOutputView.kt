@@ -15,6 +15,7 @@ import dev.cascam.config.ScoreboardSource
 import dev.cascam.geometry.NormalizedRect
 import dev.cascam.geometry.LogoGeometry
 import dev.cascam.geometry.StillFrameGeometry
+import dev.cascam.geometry.CaptureZoomGeometry
 import dev.cascam.stream.YoutubePublisher
 
 class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
@@ -81,12 +82,19 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         courtFrame?.let { drawCourt(canvas, it, config, outputWidth, outputHeight) }
         if (config.scoreboardEnabled) scoreboardFrame?.let {
             val corners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND) {
-                StillFrameGeometry.fromVideoPreview(config.scoreboardCorners, it.width, it.height)
-            } else config.scoreboardCorners
+                StillFrameGeometry.fromVideoPreview(
+                    config.scoreboardCorners, it.width, it.height, config.scoreboardCaptureZoom,
+                )
+            } else config.scoreboardCorners.map { point ->
+                CaptureZoomGeometry.fromZoomedPreview(point, config.scoreboardCaptureZoom)
+            }
             drawOverlay(canvas, it, corners, config.scoreboardDestination, outputWidth, outputHeight)
         }
         if (config.clockEnabled) clockFrame?.let {
-            drawOverlay(canvas, it, config.clockCorners, config.clockDestination, outputWidth, outputHeight)
+            val corners = config.clockCorners.map { point ->
+                CaptureZoomGeometry.fromZoomedPreview(point, config.clockCaptureZoom)
+            }
+            drawOverlay(canvas, it, corners, config.clockDestination, outputWidth, outputHeight)
         }
         if (config.logoEnabled) logoBitmap?.let { logo ->
             val destination = LogoGeometry.destination(
@@ -106,7 +114,8 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
     }
 
     private fun drawCourt(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration, outputWidth: Int, outputHeight: Int) {
-        val crop = NormalizedRect.adjustable16x9(bitmap.width, bitmap.height, config.cropZoom, config.cropPanX, config.cropPanY)
+        val configuredCrop = NormalizedRect.adjustable16x9(bitmap.width, bitmap.height, config.cropZoom, config.cropPanX, config.cropPanY)
+        val crop = CaptureZoomGeometry.fromZoomedPreview(configuredCrop, config.captureZoom)
         val source = Rect(
             (crop.left * bitmap.width).toInt(), (crop.top * bitmap.height).toInt(),
             (crop.right * bitmap.width).toInt(), (crop.bottom * bitmap.height).toInt(),

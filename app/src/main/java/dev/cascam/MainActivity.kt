@@ -1014,9 +1014,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateZoomLabels() {
         val output = OutputResolution.entries.getOrNull(binding.outputResolution.selectedItemPosition) ?: OutputResolution.HD
         binding.courtCropStatus.text = "Zoom do recorte: %.1f×".format(binding.compositionOverlay.crop().first)
-        binding.courtCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.courtCaptureZoom.progress))
-        binding.scoreboardCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
-        binding.clockCaptureZoomStatus.text = "Captura: %.1f× · saída configurada em ${output.height}p.".format(captureZoom(binding.clockCaptureZoom.progress))
+        binding.courtCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.courtCaptureZoom.progress))
+        binding.scoreboardCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.scoreboardCaptureZoom.progress))
+        binding.clockCaptureZoomStatus.text = "Zoom digital: %.1f× · igual no preview e na composição ${output.height}p.".format(captureZoom(binding.clockCaptureZoom.progress))
     }
 
     private fun updateScoreboardSourceHint() {
@@ -1086,6 +1086,11 @@ class MainActivity : AppCompatActivity() {
             val preview = previewBuilder.build().also { it.surfaceProvider = binding.preview.surfaceProvider }
             provider.unbindAll()
             boundCamera = provider.bindToLifecycle(this, selector, preview)
+            if (previewZoom > 1f) {
+                // CameraControl é o caminho público do CameraX e funciona em aparelhos que
+                // ignoram CONTROL_ZOOM_RATIO injetado pelo Interop.
+                boundCamera?.cameraControl?.setZoomRatio(previewZoom)
+            }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -1204,7 +1209,7 @@ class MainActivity : AppCompatActivity() {
             )
         } }
         if (sources.size != ids.size) return
-        val rotations = sources.associate { it.id to rotationFor(it.logicalId) }
+        val rotations = sources.associate { it.id to if (it.isStill) 0 else rotationFor(it.logicalId) }
         val engine = multiCameraEngine ?: MultiCameraEngine(
             getSystemService(CameraManager::class.java),
             onFrame = { id, bitmap -> deliverCompositionFrame(id, bitmap) },
@@ -1216,7 +1221,8 @@ class MainActivity : AppCompatActivity() {
             future.get().unbindAll()
             if (configuration.compositionEngine == CompositionEngine.GPU) {
                 val gpuRotations = sources.associate { source ->
-                    source.id to (configuration.frameRotation.degrees ?: rotationFor(source.logicalId))
+                    source.id to if (source.isStill) 0
+                    else (configuration.frameRotation.degrees ?: rotationFor(source.logicalId))
                 }
                 startMultiCameraGpu(engine, plan, gpuRotations, configuration)
             } else engine.start(plan, rotations)
