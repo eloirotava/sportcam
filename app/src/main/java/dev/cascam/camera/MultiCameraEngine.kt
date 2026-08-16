@@ -38,8 +38,16 @@ class MultiCameraEngine(
         val fps: Int,
         val zoom: Float = 1f,
         val stillIntervalMillis: Long = 0L,
+        /**
+         * Largura em que o quadro é convertido para bitmap, que não precisa ser a de captura. O
+         * custo da conversão em CPU é por pixel, então capturar o sensor inteiro e converter tudo
+         * seria pagar por pixels que o recorte descarta em seguida. Zero converte no tamanho cheio.
+         */
+        val conversionWidth: Int = 0,
     ) {
         val isStill: Boolean get() = stillIntervalMillis > 0L
+
+        val effectiveConversionWidth: Int get() = conversionWidth.takeIf { it in 1..size.width } ?: size.width
     }
     data class Plan(val sources: List<Source>)
 
@@ -84,7 +92,7 @@ class MultiCameraEngine(
                                 // JPEG é entregue na orientação correta pelo HAL. A correção
                                 // manual da GPU pertence exclusivamente aos SurfaceTextures de vídeo.
                                 requireNotNull(BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size))
-                            } else YuvFrameConverter.convert(image, source.size.width, rotations[source.id] ?: 0)
+                            } else YuvFrameConverter.convert(image, source.effectiveConversionWidth, rotations[source.id] ?: 0)
                             onFrame(source.id, bitmap)
                         }.onFailure { onStatus("Falha ao converter ${source.id}: ${it.message}") }
                     } finally { image.close() }

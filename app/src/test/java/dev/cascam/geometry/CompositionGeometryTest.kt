@@ -231,6 +231,49 @@ class CompositionGeometryTest {
         assertEquals(8f, configuration.resolvedCaptureZoom("tele"))
     }
 
+    @Test fun `court crop asks for more bitmap as the crop tightens`() {
+        // Sensor 4:3: o recorte 16:9 aproveita a largura inteira, então sem zoom basta a saída
+        // mais a folga. Cada passo de zoom multiplica a exigência na mesma proporção.
+        assertEquals(1600, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f, 1f))
+        assertEquals(3200, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 2f, 1f))
+        assertEquals(6400, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 2f, 2f))
+    }
+
+    @Test fun `court crop accounts for frames wider than the output`() {
+        // Num quadro mais largo que 16:9 parte da largura já é descartada pelo enquadramento, e o
+        // que sobra precisa cobrir a saída sozinho.
+        val wide = CompositionResolution.courtBitmapWidth(1280, 4000, 1500, 1f, 1f)
+        val standard = CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f, 1f)
+        assertEquals(true, wide > standard)
+    }
+
+    @Test fun `overlay asks for more bitmap as the marked quad shrinks`() {
+        val destination = NormalizedRect(0f, 0f, .5f, .25f)
+        val wideQuad = listOf(
+            NormalizedPoint(.25f, .1f), NormalizedPoint(.75f, .1f),
+            NormalizedPoint(.75f, .3f), NormalizedPoint(.25f, .3f),
+        )
+        val tightQuad = listOf(
+            NormalizedPoint(.375f, .1f), NormalizedPoint(.625f, .1f),
+            NormalizedPoint(.625f, .3f), NormalizedPoint(.375f, .3f),
+        )
+
+        // Destino de metade da saída a partir de metade da largura do quadro: 0,5 · 1280 · 1,25 / 0,5.
+        assertEquals(1600, CompositionResolution.overlayBitmapWidth(1280, destination, wideQuad, 1f))
+        assertEquals(3200, CompositionResolution.overlayBitmapWidth(1280, destination, tightQuad, 1f))
+    }
+
+    @Test fun `conversion width undoes the rotation applied after scaling`() {
+        // Sem giro, a largura pedida é a largura exibida.
+        assertEquals(3072, CompositionResolution.conversionWidth(3072, 4000, 3000, 0))
+        assertEquals(3072, CompositionResolution.conversionWidth(3072, 4000, 3000, 180))
+        // Em 90° a largura exibida vem da altura convertida, então a conversão precisa ser maior.
+        // Passar dos 4000 px do sensor é o sinal de que a resolução escolhida ficou pequena para o
+        // enquadramento; quem corta pelo quadro real é o motor de captura.
+        assertEquals(4096, CompositionResolution.conversionWidth(3072, 4000, 3000, 90))
+        assertEquals(2666, CompositionResolution.conversionWidth(2000, 4000, 3000, 270))
+    }
+
     @Test fun `simultaneous support follows logical camera groups`() {
         val cameras = listOf(
             CameraInfo("0/wide", "0", "wide", 1f, LensFacing.BACK),

@@ -21,6 +21,38 @@ enum class PerPhysicalZoom(val label: String) {
     NONE("não suportado"),
 }
 
+/**
+ * Tamanho de captura com o teto de taxa que ele sustenta. O app não limita resolução: quem escolhe
+ * é o operador, e o que muda de aparelho para aparelho é justamente até onde dá para subir sem o
+ * sensor cair de taxa. [maxFps] sai de `getOutputMinFrameDuration`, que é a duração mínima real do
+ * quadro naquele tamanho, limitada ainda pelo maior intervalo de AE que a câmera aceita pedir.
+ * Zero significa que o aparelho não declarou nada e só o teste no jogo responde.
+ */
+data class CaptureSize(val size: Size, val maxFps: Int) {
+    val megapixels: Float get() = size.width * size.height / 1_000_000f
+
+    /** Proporção legível: é ela que decide quanto da altura o recorte 16:9 vai descartar. */
+    val aspectLabel: String get() {
+        val width = size.width
+        val height = size.height
+        if (width <= 0 || height <= 0) return "?"
+        val divisor = greatestCommonDivisor(width, height)
+        val horizontal = width / divisor
+        val vertical = height / divisor
+        return if (horizontal <= 32 && vertical <= 32) "$horizontal:$vertical"
+        else "%.2f:1".format(width.toFloat() / height)
+    }
+
+    val label: String get() = buildString {
+        append("${size.width}×${size.height}")
+        append(" · ").append(aspectLabel)
+        if (megapixels >= 1f) append(" · ").append("%.1f MP".format(megapixels))
+        if (maxFps > 0) append(" · até ").append(maxFps).append(" fps")
+    }
+
+    private fun greatestCommonDivisor(a: Int, b: Int): Int = if (b == 0) a else greatestCommonDivisor(b, a % b)
+}
+
 data class CameraInfo(
     val id: String,
     val logicalCameraId: String,
@@ -41,9 +73,17 @@ data class CameraInfo(
     /** Chaves que o request aceita sobrescrever por sensor, sem o prefixo `android.`. */
     val physicalRequestKeys: List<String> = emptyList(),
     val zoomRatioRange: String? = null,
-    val yuvSizes: List<Size> = emptyList(),
+    val captureSizes: List<CaptureSize> = emptyList(),
     val fpsRanges: List<Range<Int>> = emptyList(),
 ) {
+    val yuvSizes: List<Size> get() = captureSizes.map { it.size }
+
+    /** Teto declarado para o tamanho; zero quando o aparelho não informou. */
+    fun maxFpsFor(size: Size): Int = captureSizes.firstOrNull { it.size == size }?.maxFps ?: 0
+
+    /** Se o tamanho aguenta a taxa pedida. Sem declaração, não reprova: quem decide é o teste. */
+    fun sustains(size: Size, fps: Int): Boolean = fps <= 0 || maxFpsFor(size).let { it <= 0 || it >= fps }
+
     /**
      * Exposição por sensor. Placar de LED estoura quando a medição é feita pela quadra escura, e
      * placar de parede clara faz o contrário; sem esta chave os dois dividem a mesma exposição.
@@ -57,8 +97,15 @@ data class CameraInfo(
         it == "lens.focusDistance" || it == "control.afMode" || it == "control.afRegions"
     }
 
-    /** Quanto dá para recortar no sensor antes de começar a esticar pixel, saindo em 1080p. */
-    val losslessCropAt1080p: Float? get() = maximumYuvSize?.let { it.width / 1920f }
+    /**
+     * Quanto dá para recortar antes de começar a esticar pixel, para uma largura de saída qualquer.
+     * É a conta que justifica capturar acima da resolução transmitida: saindo em 720p, um sensor que
+     * entrega 4000 px de largura aguenta recorte de 3,1× ainda com pixel real sobrando.
+     */
+    fun losslessCropFor(outputWidth: Int): Float? =
+        if (outputWidth <= 0) null else maximumYuvSize?.let { it.width.toFloat() / outputWidth }
+
+    val losslessCropAt1080p: Float? get() = losslessCropFor(1920)
 
     val isPhysical: Boolean get() = physicalCameraId != null
 
@@ -74,7 +121,10 @@ data class CameraInfo(
         append(" · ").append(lensFacing.label)
         append(" · ").append(lensLabel)
         minimumFocalLength?.let { append(" · ").append("%.1f mm".format(it)) }
-        maximumYuvSize?.let { append(" · YUV máx ").append("${it.width}x${it.height}") }
+        maximumYuvSize?.let {
+            append(" · YUV máx ").append("${it.width}x${it.height}")
+            maxFpsFor(it).takeIf { fps -> fps > 0 }?.let { fps -> append(" @ ").append(fps).append(" fps") }
+        }
         maximumJpegSize?.let { append(" · foto máx ").append("${it.width}x${it.height}") }
         if (isPhysical) losslessCropAt1080p?.takeIf { it > 1.05f }?.let {
             append(" · crop limpo até ").append("%.1f×".format(it)).append(" em 1080p")
@@ -128,11 +178,11 @@ object CameraCapabilitiesReader {
                 characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull(),
                 facing, horizontalFieldOfView(characteristics), maximumYuvSize(characteristics), maximumJpegSize(characteristics), level, multiCamera,
                 perPhysicalZoom(physicalKeys), physicalKeys, zoomRatioRange(characteristics),
-                yuvSizes(characteristics), fpsRanges(characteristics),
+                captureSizes(characteristics), fpsRanges(characteristics),
             )
             val physical = characteristics.physicalCameraIds.map { physicalId ->
                 val physicalCharacteristics = manager.getCameraCharacteristics(physicalId)
-                val physicalSizes = yuvSizes(physicalCharacteristics).ifEmpty { yuvSizes(characteristics) }
+                val physicalSizes = captureSizes(physicalCharacteristics).ifEmpty { captureSizes(characteristics) }
                 val physicalFps = fpsRanges(physicalCharacteristics).ifEmpty { fpsRanges(characteristics) }
                 CameraInfo(
                     "$id/$physicalId", id, physicalId,
@@ -193,12 +243,40 @@ object CameraCapabilitiesReader {
         ?.getOutputSizes(ImageFormat.JPEG)
         ?.maxByOrNull { it.width.toLong() * it.height }
 
-    private fun yuvSizes(characteristics: CameraCharacteristics): List<Size> {
+    /**
+     * Todos os tamanhos que servem para vídeo, sem teto de resolução — o aparelho decide o que
+     * oferece e o operador decide o que usar. A cada tamanho vai junto a taxa que ele sustenta,
+     * porque é isso que muda entre pedir 1080p e pedir o sensor inteiro: acima de certo ponto o
+     * limite deixa de ser a combinação de streams e passa a ser a leitura do sensor.
+     */
+    private fun captureSizes(characteristics: CameraCharacteristics): List<CaptureSize> {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return emptyList()
         val yuv = map.getOutputSizes(ImageFormat.YUV_420_888)?.toSet().orEmpty()
         val gpu = map.getOutputSizes(SurfaceTexture::class.java)?.toSet().orEmpty()
+        val requestableFps = fpsRanges(characteristics).maxOfOrNull { it.upper } ?: 0
         return (if (gpu.isEmpty()) yuv else yuv intersect gpu)
             .sortedByDescending { it.width.toLong() * it.height }
+            .map { size -> CaptureSize(size, sustainedFps(map, size, requestableFps)) }
+    }
+
+    /**
+     * Menor entre o que o stream entrega e o que o AE aceita pedir. Um sem o outro engana: há
+     * tamanho cuja leitura sustenta 30 fps mas nenhum intervalo de AE chega lá, e há intervalo de
+     * AE anunciado que o sensor não alimenta naquele tamanho.
+     */
+    private fun sustainedFps(
+        map: android.hardware.camera2.params.StreamConfigurationMap,
+        size: Size,
+        requestableFps: Int,
+    ): Int {
+        val minimumDuration = runCatching { map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, size) }
+            .getOrNull() ?: 0L
+        val streamFps = if (minimumDuration > 0L) (1_000_000_000.0 / minimumDuration).toInt() else 0
+        return when {
+            streamFps <= 0 -> requestableFps
+            requestableFps <= 0 -> streamFps
+            else -> minOf(streamFps, requestableFps)
+        }
     }
 
     private fun fpsRanges(characteristics: CameraCharacteristics): List<Range<Int>> = characteristics

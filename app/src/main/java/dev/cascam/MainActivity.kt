@@ -70,6 +70,7 @@ import dev.cascam.config.BroadcastConfigurationStore
 import dev.cascam.databinding.ActivityMainBinding
 import dev.cascam.ui.CompositionOverlayView
 import dev.cascam.ui.YuvToBitmapConverter
+import dev.cascam.geometry.CompositionResolution
 import dev.cascam.geometry.WhiteTransparency
 import dev.cascam.stream.YoutubePublisher
 import java.io.IOException
@@ -162,8 +163,10 @@ class MainActivity : AppCompatActivity() {
     private fun configureForm(configuration: BroadcastConfiguration) {
         compositionConfiguration = configuration
         cameraIds = capabilities.cameras.map { it.id }
+        // Ângulo em vez de focal: milímetro de sensor de celular não diz nada sem a equivalência de
+        // 35 mm, e o que interessa aqui é quanto de quadra cabe no quadro.
         val labels = capabilities.cameras.map {
-            "${if (it.physicalCameraId == null) "Lógica" else "Física"} ${it.id} · ${it.lensFacing.label} · ${it.minimumFocalLength?.let { focal -> "$focal mm" } ?: "focal ?"}"
+            "${if (it.physicalCameraId == null) "Lógica" else "Física"} ${it.id} · ${it.lensFacing.label} · ${it.lensLabel}"
         }
         binding.courtCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         binding.scoreboardCamera.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
@@ -487,8 +490,11 @@ class MainActivity : AppCompatActivity() {
         selectedFps: Int? = null,
     ) {
         val camera = capabilities.camera(cameraId)
-        val sizes = listOf("Automática" to (0 to 0)) + camera?.yuvSizes.orEmpty().map {
-            "${it.width}×${it.height}" to (it.width to it.height)
+        // Nenhum tamanho é escondido: o aparelho lista, a etiqueta informa o custo em taxa e a
+        // escolha é do operador. É o mesmo app rodando em S22 e em S25 Ultra, com sensores
+        // diferentes; qualquer teto fixo aqui seria chute sobre o aparelho do outro.
+        val sizes = listOf("Automática" to (0 to 0)) + camera?.captureSizes.orEmpty().map {
+            it.label to (it.size.width to it.size.height)
         }
         val fpsValues = listOf(0) + camera?.fpsRanges.orEmpty().map { it.upper }.distinct().sorted()
         val (resolutionSpinner, fpsSpinner) = when (layer) {
@@ -513,19 +519,35 @@ class MainActivity : AppCompatActivity() {
         fpsSpinner.setSelection(fpsValues.indexOf(preservedFps).coerceAtLeast(0))
     }
 
-    private fun automaticCaptureSize(ids: Set<String>): android.util.Size {
-        val common = ids.mapNotNull(capabilities::camera).map { it.yuvSizes.toSet() }
-            .reduceOrNull { result, sizes -> result intersect sizes }.orEmpty()
-            .sortedByDescending { it.width.toLong() * it.height }
-        return common.firstOrNull { it.width <= 1920 && it.height <= 1080 }
-            ?: common.firstOrNull()
-            ?: CameraXSupport.DEFAULT_ANALYSIS_SIZE
+    /**
+     * O automático perdeu o teto de 1080p e ganhou um critério em vez dele: o menor tamanho que
+     * ainda entrega pixel real ao enquadramento atual, entre os que sustentam a taxa pedida.
+     *
+     * Teto fixo era chute sobre o aparelho dos outros — 1080p foi o que um S22 aprovou, e um S25
+     * Ultra herdaria o limite à toa. Já "o maior que couber" gastaria calor com pixel que o recorte
+     * descarta. Recortar 2× a quadra para sair em 720p precisa de 3200 px de largura; abaixo disso a
+     * imagem estica, acima disso não melhora. Quem quiser outro valor escolhe na lista, que continua
+     * mostrando tudo o que o aparelho oferece.
+     */
+    private fun automaticCaptureSize(
+        configuration: BroadcastConfiguration,
+        cameraId: String,
+        targetFps: Int,
+    ): android.util.Size {
+        val camera = capabilities.camera(cameraId) ?: return CameraXSupport.DEFAULT_ANALYSIS_SIZE
+        val ascending = camera.yuvSizes.sortedBy { it.width.toLong() * it.height }
+        val sustained = ascending.filter { camera.sustains(it, targetFps) }.ifEmpty { ascending }
+        val rotation = rotationFor(camera.logicalCameraId)
+        return sustained.firstOrNull { size ->
+            val required = requiredCaptureWidth(configuration, cameraId, size, rotation)
+            required in 1..size.width
+        } ?: sustained.lastOrNull() ?: CameraXSupport.DEFAULT_ANALYSIS_SIZE
     }
 
     private fun captureSizeFor(configuration: BroadcastConfiguration, cameraId: String): android.util.Size {
         val settings = configuration.resolvedCaptureSettings(cameraId)
         return if (settings.hasSize) android.util.Size(settings.width, settings.height)
-        else automaticCaptureSize(setOf(cameraId))
+        else automaticCaptureSize(configuration, cameraId, settings.fps.takeIf { it > 0 } ?: configuration.outputFps)
     }
 
     private fun readForm(): BroadcastConfiguration {
@@ -958,8 +980,26 @@ class MainActivity : AppCompatActivity() {
                 toast("Autorize o microfone para transmitir com áudio")
                 permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
             }
-            else -> configuration
+            else -> configuration.also { warnAboutSustainedRate(it, selectedCameras) }
         }
+    }
+
+    /**
+     * Aviso, não bloqueio. O aparelho declara até onde cada tamanho sustenta taxa, mas declaração
+     * erra nos dois sentidos e quem confere é o jogo. Então o app avisa e transmite mesmo assim; a
+     * taxa medida de verdade aparece no status durante a captura.
+     */
+    private fun warnAboutSustainedRate(configuration: BroadcastConfiguration, cameras: List<CameraInfo>) {
+        val target = configuration.captureFps.takeIf { it > 0 } ?: configuration.outputFps
+        val declared = cameras.mapNotNull { camera ->
+            if (configuration.stillIntervalFor(camera.id) > 0L) return@mapNotNull null
+            val requested = configuration.resolvedCaptureSettings(camera.id)
+            if (!requested.hasSize) return@mapNotNull null
+            val size = android.util.Size(requested.width, requested.height)
+            camera.maxFpsFor(size).takeIf { it in 1 until target }
+        }
+        val worst = declared.minOrNull() ?: return
+        toast("Nesta resolução o aparelho declara cerca de $worst fps, e a captura pediu $target fps")
     }
 
     private fun toggleBroadcast() {
@@ -1296,6 +1336,8 @@ class MainActivity : AppCompatActivity() {
                 fps = settings.fps,
                 zoom = configuration.resolvedCaptureZoom(id),
                 stillIntervalMillis = stillInterval,
+                conversionWidth = if (stillInterval > 0L) 0
+                else conversionWidthFor(configuration, id, size, rotationFor(camera.logicalCameraId)),
             )
         } }
         if (sources.size != ids.size) return
@@ -1352,6 +1394,73 @@ class MainActivity : AppCompatActivity() {
         } else submitSourceFrame(id, bitmap, configuration)
     }
 
+    /**
+     * Em quanto o quadro desta câmera é convertido para bitmap. Uma câmera pode servir quadra,
+     * placar e cronômetro ao mesmo tempo; vale a exigência de quem precisa de mais pixel. Sem isso,
+     * escolher o sensor inteiro faria a conversão em CPU converter dezenas de megapixels por quadro
+     * para depois jogar quase tudo fora no recorte — e a resolução alta pareceria "não funcionar"
+     * por um motivo que não é o do sensor.
+     */
+    private fun conversionWidthFor(
+        configuration: BroadcastConfiguration,
+        cameraId: String,
+        size: android.util.Size,
+        rotationDegrees: Int,
+    ): Int = requiredCaptureWidth(configuration, cameraId, size, rotationDegrees).coerceAtMost(size.width)
+
+    /**
+     * Largura de captura que a composição consome, sem cortar pelo que o sensor entrega. Passar do
+     * tamanho do quadro é informação útil, não erro: significa que o enquadramento pedido gostaria
+     * de mais pixel do que a resolução escolhida tem — é assim que o automático sabe subir.
+     */
+    private fun requiredCaptureWidth(
+        configuration: BroadcastConfiguration,
+        cameraId: String,
+        size: android.util.Size,
+        rotationDegrees: Int,
+    ): Int {
+        val outputWidth = configuration.outputResolution.width
+        val quarterTurn = ((rotationDegrees % 360) + 360) % 360 % 180 != 0
+        val displayedWidth = if (quarterTurn) size.height else size.width
+        val displayedHeight = if (quarterTurn) size.width else size.height
+        val required = buildList {
+            if (configuration.courtCameraId == cameraId) add(
+                CompositionResolution.courtBitmapWidth(
+                    outputWidth, displayedWidth, displayedHeight,
+                    configuration.cropZoom, configuration.captureZoom,
+                ),
+            )
+            if (configuration.scoreboardEnabled && configuration.cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId) add(
+                CompositionResolution.overlayBitmapWidth(
+                    outputWidth, configuration.scoreboardDestination,
+                    configuration.scoreboardCorners, configuration.scoreboardCaptureZoom,
+                ),
+            )
+            if (configuration.clockEnabled && configuration.cameraIdFor(OverlayLayer.CLOCK) == cameraId) add(
+                CompositionResolution.overlayBitmapWidth(
+                    outputWidth, configuration.clockDestination,
+                    configuration.clockCorners, configuration.clockCaptureZoom,
+                ),
+            )
+        }
+        val displayed = required.maxOrNull() ?: return 0
+        return CompositionResolution.conversionWidth(displayed, size.width, size.height, rotationDegrees)
+    }
+
+    /**
+     * Teto do par de sensores físicos quando o operador deixou a resolução em automática. Era fixo
+     * em 1080p porque foi o que um S22 aprovou; virou consulta ao próprio aparelho, senão um S25
+     * Ultra herdaria o limite de outro telefone. Escolhe o maior tamanho comum aos dois sensores que
+     * ainda sustenta a taxa; sem nenhum tamanho comum declarado, cai no 1080p de antes.
+     */
+    private fun dualSensorCeiling(court: CameraInfo, scoreboard: CameraInfo, fps: Int): android.util.Size {
+        val common = (court.yuvSizes.toSet() intersect scoreboard.yuvSizes.toSet())
+            .sortedByDescending { it.width.toLong() * it.height }
+        return common.firstOrNull { size -> court.sustains(size, fps) && scoreboard.sustains(size, fps) }
+            ?: common.firstOrNull()
+            ?: FALLBACK_DUAL_SENSOR_CEILING
+    }
+
     private fun rotationFor(logicalId: String): Int {
         val sensor = runCatching {
             getSystemService(CameraManager::class.java).getCameraCharacteristics(logicalId)
@@ -1379,17 +1488,24 @@ class MainActivity : AppCompatActivity() {
             onStatus = { status -> runOnUiThread { binding.broadcastStatus.text = status } },
         ).also { dualCameraEngine = it }
         val configured = compositionConfiguration
+        val captureFps = configured.captureFps.takeIf { it > 0 } ?: configured.outputFps
         val ceiling = if (configured.captureWidth > 0 && configured.captureHeight > 0) {
             android.util.Size(configured.captureWidth, configured.captureHeight)
-        } else DUAL_SENSOR_CEILING
-        val captureFps = configured.captureFps.takeIf { it > 0 } ?: configured.outputFps
+        } else dualSensorCeiling(court, scoreboard, captureFps)
         val plan = engine.planFor(capabilities, court, scoreboard, ceiling, captureFps) ?: return false
         val useGpu = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
         // Só abrir a lógica depois que o CameraX largou, senão o openCamera volta com CAMERA_IN_USE.
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             runCatching { future.get().unbindAll() }
-            if (useGpu) startGpuComposition(engine, plan) else engine.start(plan, compositionRotation(engine, plan, gpu = false))
+            if (useGpu) startGpuComposition(engine, plan) else {
+                val rotation = compositionRotation(engine, plan, gpu = false)
+                engine.start(
+                    plan, rotation,
+                    conversionWidths = conversionWidthFor(configured, court.id, plan.size, rotation) to
+                        conversionWidthFor(configured, scoreboard.id, plan.size, rotation),
+                )
+            }
         }, ContextCompat.getMainExecutor(this))
         return true
     }
@@ -1594,8 +1710,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
-        /** Teto de captura dos dois sensores; o teste confirmou 1920x1080 neste aparelho. */
-        val DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
+        /** Último recurso quando os dois sensores não declaram nenhum tamanho em comum. */
+        val FALLBACK_DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
         val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
         const val SCOREBOARD_MAX_ZOOM = 8f
         const val PRIVACY_POLICY_URL = "https://github.com/eloirotava/sportcam/blob/main/docs/privacy-policy.md"

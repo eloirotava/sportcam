@@ -22,10 +22,13 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - placar e cronômetro filmados opcionais, cada um com quadrilátero de quatro pontos
   para planificar a origem e retângulo próprio de destino na composição;
 - seleção independente da câmera da quadra, do placar e do cronômetro, incluindo lentes traseiras,
-  frontais e externas anunciadas pelo Android;
+  frontais e externas anunciadas pelo Android, identificadas pelo ângulo de visão em vez da focal
+  em milímetros — num sensor de celular o milímetro só significaria algo com a equivalência de 35 mm,
+  e o que decide a escolha é quanto de quadra cabe no quadro;
 - compartilhamento de um único stream quando duas ou três camadas escolhem a mesma câmera;
-- seleção de resolução e FPS por fonte; camadas que compartilham câmera usam o perfil
-  mais exigente entre elas;
+- seleção de resolução e FPS por fonte, **sem teto de resolução**: a lista traz todos os tamanhos que
+  o aparelho oferece, cada um com proporção, megapixels e a taxa que ele sustenta, e a escolha é do
+  operador. Camadas que compartilham câmera usam o perfil mais exigente entre elas;
 - saída configurável em 360p, 540p, 720p ou 1080p e 15, 20, 24, 30 ou 60 fps,
   independente do bitrate;
 - controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
@@ -70,6 +73,38 @@ a incompatibilidade e mantém somente a quadra.
 O botão alterna entre iniciar e encerrar a transmissão e mostra falhas de conexão ou
 codificação na própria tela. A chave fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
+
+## Capturar acima da resolução transmitida
+
+A quadra não é enviada inteira: o que vai ao ar é um retângulo 16:9 recortado dela. Captura e saída
+são, portanto, duas coisas diferentes, e igualar as duas desperdiça a única margem que existe.
+
+Com captura em 1920×1080 e recorte de 2×, sobram 960×540 pixels reais, que sobem esticados até os
+1280×720 da saída — a imagem fica mole por aritmética, não por falta de lente. Com o mesmo recorte
+sobre um quadro de 3840 px de largura, sobram 1920×1080 reais para reduzir a 720p; reduzir ainda
+média o ruído, então o resultado sai mais limpo que 720p capturado direto.
+
+Por isso o app não impõe teto de resolução. Cada aparelho anuncia os tamanhos que oferece e, para
+cada um, a duração mínima do quadro — a lista mostra a taxa que dali resulta, e o operador escolhe.
+Um S22 e um S25 Ultra não têm o mesmo limite, e fixar no código o que um deles aprovou seria decidir
+pelo outro. Quando o tamanho escolhido declara taxa menor que a pedida, o app avisa e transmite
+assim mesmo: declaração de aparelho erra nos dois sentidos, e quem confere é o jogo.
+
+Deixada em **Automática**, a resolução vira uma conta em vez de um teto: o menor tamanho que ainda
+entrega pixel real ao enquadramento atual, entre os que sustentam a taxa pedida. Recorte de 2× para
+sair em 720p pede 3200 px de largura; abaixo disso a imagem estica, acima disso não melhora.
+
+O custo aparece na composição por CPU, onde converter YUV para bitmap se paga por pixel: converter o
+sensor inteiro para descartar quase tudo no recorte seguinte torraria o aparelho sem ganho nenhum.
+A conversão então acontece na largura que a composição realmente consome, e não na de captura, de
+modo que subir a resolução do sensor não encarece o laço. Na GPU o recorte é coordenada de textura
+e já era de graça.
+
+Vale lembrar que existe um caminho ainda mais barato para o mesmo efeito, quando o HAL o oferece:
+pedir o recorte ao próprio sensor por `SCALER_CROP_REGION`, que devolve a região já recortada no
+tamanho pedido, sem mover os pixels excedentes. O inventário de câmeras já detecta esse suporte em
+[`PerPhysicalZoom`](app/src/main/java/dev/cascam/camera/CameraCapabilities.kt); `CONTROL_ZOOM_RATIO`
+não serve sozinho porque é sempre centralizado, e o recorte da quadra tem deslocamento.
 
 ## Galaxy S22 e duas câmeras
 
