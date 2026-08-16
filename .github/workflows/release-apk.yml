@@ -49,8 +49,30 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      # Sem chave fixa, cada runner gera um debug.keystore próprio e todo APK publicado sai com
+      # assinatura diferente. O Android recusa atualizar por cima de assinatura que não confere, e
+      # desinstalar apaga a configuração do app, que não tem backup. Com o secret definido, as
+      # atualizações passam a instalar por cima.
+      - name: Restaurar keystore de debug
+        env:
+          DEBUG_KEYSTORE: ${{ secrets.SPORTCAM_DEBUG_KEYSTORE }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE" ]; then
+            echo "::warning::Secret SPORTCAM_DEBUG_KEYSTORE ausente; este APK sairá com assinatura nova e exigirá desinstalar a versão anterior."
+            exit 0
+          fi
+          printf '%s' "$DEBUG_KEYSTORE" | base64 -d > "$RUNNER_TEMP/sportcam-debug.keystore"
+          echo "SPORTCAM_DEBUG_KEYSTORE_FILE=$RUNNER_TEMP/sportcam-debug.keystore" >> "$GITHUB_ENV"
+
       - name: Run tests and build debug APK
         run: gradle test assembleDebug --stacktrace
+
+      # A assinatura fica registrada no log: se este valor mudar entre releases, atualizar por cima
+      # volta a falhar, e é melhor descobrir aqui do que com o celular na mão.
+      - name: Registrar assinatura do APK
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs \
+            app/build/outputs/apk/debug/app-debug.apk | grep -i "SHA-256 digest"
 
       - name: Rename APK
         run: |

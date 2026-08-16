@@ -275,6 +275,34 @@ gradle assembleDebug
 
 O APK de debug será criado em `app/build/outputs/apk/debug/app-debug.apk`.
 
+### Assinatura das builds de teste
+
+Sem chave fixa, o AGP inventa um `debug.keystore` novo em cada máquina, e todo APK publicado pelo
+CI sai assinado por uma chave diferente. O Android recusa atualizar por cima de assinatura que não
+confere, então cada release exigiria desinstalar a anterior — e como o app guarda servidor, chave do
+YouTube e os cantos do placar em preferências com `allowBackup="false"`, desinstalar apaga a
+configuração inteira.
+
+Por isso o workflow **Release APK** restaura um keystore fixo a partir do secret
+`SPORTCAM_DEBUG_KEYSTORE`, que guarda o arquivo em base64. Ele é independente da chave de upload do
+Play, que continua vindo de `SPORTCAM_KEYSTORE_FILE` e companhia. Para gerar e cadastrar:
+
+```bash
+keytool -genkeypair -v -keystore sportcam-debug.keystore \
+  -storepass android -keypass android -alias androiddebugkey \
+  -keyalg RSA -keysize 2048 -validity 10950 \
+  -dname "CN=SportCam Debug, O=SportCam, C=BR"
+
+base64 -w0 sportcam-debug.keystore | gh secret set SPORTCAM_DEBUG_KEYSTORE
+```
+
+Guarde o arquivo fora do repositório: perdê-lo custa uma última desinstalação em todos os aparelhos
+que já têm o app. Cada build registra no log a impressão SHA-256 do certificado, então uma troca
+acidental de chave aparece no Action antes de aparecer no celular.
+
+Localmente o mesmo keystore vale definindo `SPORTCAM_DEBUG_KEYSTORE_FILE` com o caminho do arquivo;
+sem a variável, o comportamento é o padrão do AGP.
+
 ## Google Play
 
 O projeto já gera Android App Bundle para a Play Store, usa API 36 e contém as
