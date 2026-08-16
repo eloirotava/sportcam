@@ -12,8 +12,8 @@ class BroadcastConfigurationStore(context: Context) {
         scoreboardCameraId = preferences.getString("scoreboard_camera", "").orEmpty(),
         scoreboardEnabled = preferences.getBoolean("scoreboard_enabled", true),
         scoreboardSource = runCatching {
-            ScoreboardSource.valueOf(preferences.getString("scoreboard_source", null).orEmpty())
-        }.getOrDefault(ScoreboardSource.VIDEO),
+            OverlaySource.valueOf(preferences.getString("scoreboard_source", null).orEmpty())
+        }.getOrDefault(OverlaySource.VIDEO),
         scoreboardPhotoIntervalMillis = preferences.getLong("scoreboard_photo_interval_ms", 1_000L)
             .takeIf { it in PHOTO_INTERVAL_OPTIONS_MILLIS } ?: 1_000L,
         cropZoom = preferences.getFloat("crop_zoom", 1f),
@@ -23,20 +23,22 @@ class BroadcastConfigurationStore(context: Context) {
         scoreboardDestination = decodeRect(preferences.getString("scoreboard_destination", null)),
         clockCameraId = preferences.getString("clock_camera", "").orEmpty(),
         clockEnabled = preferences.getBoolean("clock_enabled", false),
+        clockSource = runCatching {
+            OverlaySource.valueOf(preferences.getString("clock_source", null).orEmpty())
+        }.getOrDefault(OverlaySource.VIDEO),
+        clockPhotoIntervalMillis = preferences.getLong("clock_photo_interval_ms", 1_000L)
+            .takeIf { it in PHOTO_INTERVAL_OPTIONS_MILLIS } ?: 1_000L,
         clockCorners = decodeCorners(preferences.getString("clock_corners", null), DEFAULT_CLOCK_CORNERS),
         clockDestination = decodeRect(preferences.getString("clock_destination", null), DEFAULT_CLOCK_DESTINATION),
         captureWidth = preferences.getInt("capture_width", 0).coerceAtLeast(0),
         captureHeight = preferences.getInt("capture_height", 0).coerceAtLeast(0),
         captureFps = preferences.getInt("capture_fps", 0).coerceAtLeast(0),
-        captureZoom = preferences.getFloat("capture_zoom", 1f).coerceIn(1f, 8f),
         scoreboardCaptureWidth = preferences.getInt("scoreboard_capture_width", 0).coerceAtLeast(0),
         scoreboardCaptureHeight = preferences.getInt("scoreboard_capture_height", 0).coerceAtLeast(0),
         scoreboardCaptureFps = preferences.getInt("scoreboard_capture_fps", 0).coerceAtLeast(0),
-        scoreboardCaptureZoom = preferences.getFloat("scoreboard_capture_zoom", 1f).coerceIn(1f, 8f),
         clockCaptureWidth = preferences.getInt("clock_capture_width", 0).coerceAtLeast(0),
         clockCaptureHeight = preferences.getInt("clock_capture_height", 0).coerceAtLeast(0),
         clockCaptureFps = preferences.getInt("clock_capture_fps", 0).coerceAtLeast(0),
-        clockCaptureZoom = preferences.getFloat("clock_capture_zoom", 1f).coerceIn(1f, 8f),
         logoUri = preferences.getString("logo_uri", "").orEmpty(),
         logoEnabled = preferences.getBoolean("logo_enabled", false),
         logoWhiteTransparent = preferences.getBoolean("logo_white_transparent", false),
@@ -82,6 +84,8 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("scoreboard_camera", configuration.scoreboardCameraId)
             .putBoolean("scoreboard_enabled", configuration.scoreboardEnabled)
             .putString("scoreboard_source", configuration.scoreboardSource.name)
+            .putString("clock_source", configuration.clockSource.name)
+            .putLong("clock_photo_interval_ms", configuration.clockPhotoIntervalMillis)
             .putLong("scoreboard_photo_interval_ms", configuration.scoreboardPhotoIntervalMillis)
             .putFloat("crop_zoom", configuration.cropZoom)
             .putFloat("crop_pan_x", configuration.cropPanX)
@@ -95,15 +99,12 @@ class BroadcastConfigurationStore(context: Context) {
             .putInt("capture_width", configuration.captureWidth)
             .putInt("capture_height", configuration.captureHeight)
             .putInt("capture_fps", configuration.captureFps)
-            .putFloat("capture_zoom", configuration.captureZoom)
             .putInt("scoreboard_capture_width", configuration.scoreboardCaptureWidth)
             .putInt("scoreboard_capture_height", configuration.scoreboardCaptureHeight)
             .putInt("scoreboard_capture_fps", configuration.scoreboardCaptureFps)
-            .putFloat("scoreboard_capture_zoom", configuration.scoreboardCaptureZoom)
             .putInt("clock_capture_width", configuration.clockCaptureWidth)
             .putInt("clock_capture_height", configuration.clockCaptureHeight)
             .putInt("clock_capture_fps", configuration.clockCaptureFps)
-            .putFloat("clock_capture_zoom", configuration.clockCaptureZoom)
             .putString("logo_uri", configuration.logoUri)
             .putBoolean("logo_enabled", configuration.logoEnabled)
             .putBoolean("logo_white_transparent", configuration.logoWhiteTransparent)

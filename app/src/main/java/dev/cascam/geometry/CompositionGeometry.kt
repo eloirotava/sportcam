@@ -109,23 +109,27 @@ object WhiteTransparency {
 }
 
 object StillFrameGeometry {
-    /** Converte pontos marcados no preview 16:9 para o JPEG cheio, normalmente 4:3. */
+    /**
+     * Converte pontos marcados no preview 16:9 para o JPEG cheio, normalmente 4:3.
+     *
+     * Esta é a única reinterpretação que sobra sobre os cantos marcados. A ampliação da tela não
+     * entra aqui: ela é transformação de View, não muda as coordenadas locais do toque, e por isso
+     * o que fica salvo já está em espaço de quadro cheio. Era diferente quando existia zoom digital
+     * — o valor do slider era aplicado no desenho, então mexer nele depois movia a marcação.
+     */
     fun fromVideoPreview(
         corners: List<NormalizedPoint>,
         stillWidth: Int,
         stillHeight: Int,
-        previewZoom: Float = 1f,
     ): List<NormalizedPoint> {
         val videoCrop = NormalizedRect.centered16x9(stillWidth, stillHeight)
         return corners.map { point ->
-            val unzoomed = CaptureZoomGeometry.fromZoomedPreview(point, previewZoom)
             NormalizedPoint(
-                videoCrop.left + unzoomed.x * videoCrop.width,
-                videoCrop.top + unzoomed.y * videoCrop.height,
+                videoCrop.left + point.x * videoCrop.width,
+                videoCrop.top + point.y * videoCrop.height,
             )
         }
     }
-
 }
 
 /**
@@ -151,11 +155,10 @@ object CompositionResolution {
         displayedWidth: Int,
         displayedHeight: Int,
         cropZoom: Float,
-        captureZoom: Float,
     ): Int {
         require(outputWidth > 0 && displayedWidth > 0 && displayedHeight > 0)
         val base = NormalizedRect.centered16x9(displayedWidth, displayedHeight).width
-        val fraction = base / cropZoom.coerceAtLeast(1f) / captureZoom.coerceAtLeast(1f)
+        val fraction = base / cropZoom.coerceAtLeast(1f)
         return ceilToInt(outputWidth * HEADROOM / fraction)
     }
 
@@ -167,14 +170,12 @@ object CompositionResolution {
         outputWidth: Int,
         destination: NormalizedRect,
         corners: List<NormalizedPoint>,
-        captureZoom: Float,
     ): Int {
         require(outputWidth > 0)
         // Sem quadrilátero não há o que estimar; a sobreposição não desenha e a fonte não precisa
         // de mais que a saída. Isso é caminho de configuração salva por uma versão antiga.
         if (corners.isEmpty()) return outputWidth
-        val rawSpan = corners.maxOf { it.x } - corners.minOf { it.x }
-        val span = (rawSpan / captureZoom.coerceAtLeast(1f)).coerceAtLeast(MINIMUM_SPAN)
+        val span = (corners.maxOf { it.x } - corners.minOf { it.x }).coerceAtLeast(MINIMUM_SPAN)
         return ceilToInt(destination.width * outputWidth * HEADROOM / span)
     }
 
@@ -202,19 +203,3 @@ object CompositionResolution {
     private const val MINIMUM_WIDTH = 16
 }
 
-/** Recorte central previsível, independente de o HAL respeitar zoom por sensor físico. */
-object CaptureZoomGeometry {
-    fun fromZoomedPreview(point: NormalizedPoint, zoom: Float): NormalizedPoint {
-        val safeZoom = zoom.coerceIn(1f, 20f)
-        return NormalizedPoint(
-            .5f + (point.x - .5f) / safeZoom,
-            .5f + (point.y - .5f) / safeZoom,
-        )
-    }
-
-    fun fromZoomedPreview(rect: NormalizedRect, zoom: Float): NormalizedRect {
-        val topLeft = fromZoomedPreview(NormalizedPoint(rect.left, rect.top), zoom)
-        val bottomRight = fromZoomedPreview(NormalizedPoint(rect.right, rect.bottom), zoom)
-        return NormalizedRect(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y)
-    }
-}

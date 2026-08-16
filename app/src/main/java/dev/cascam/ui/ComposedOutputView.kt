@@ -11,11 +11,10 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
 import dev.cascam.config.BroadcastConfiguration
-import dev.cascam.config.ScoreboardSource
+import dev.cascam.config.OverlayLayer
 import dev.cascam.geometry.NormalizedRect
 import dev.cascam.geometry.LogoGeometry
 import dev.cascam.geometry.StillFrameGeometry
-import dev.cascam.geometry.CaptureZoomGeometry
 import dev.cascam.stream.YoutubePublisher
 
 class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
@@ -81,20 +80,16 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         val config = configuration
         courtFrame?.let { drawCourt(canvas, it, config, outputWidth, outputHeight) }
         if (config.scoreboardEnabled) scoreboardFrame?.let {
-            val corners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND) {
-                StillFrameGeometry.fromVideoPreview(
-                    config.scoreboardCorners, it.width, it.height, config.scoreboardCaptureZoom,
-                )
-            } else config.scoreboardCorners.map { point ->
-                CaptureZoomGeometry.fromZoomedPreview(point, config.scoreboardCaptureZoom)
-            }
-            drawOverlay(canvas, it, corners, config.scoreboardDestination, outputWidth, outputHeight)
+            drawOverlay(
+                canvas, it, cornersFor(config, OverlayLayer.SCOREBOARD, it),
+                config.scoreboardDestination, outputWidth, outputHeight,
+            )
         }
         if (config.clockEnabled) clockFrame?.let {
-            val corners = config.clockCorners.map { point ->
-                CaptureZoomGeometry.fromZoomedPreview(point, config.clockCaptureZoom)
-            }
-            drawOverlay(canvas, it, corners, config.clockDestination, outputWidth, outputHeight)
+            drawOverlay(
+                canvas, it, cornersFor(config, OverlayLayer.CLOCK, it),
+                config.clockDestination, outputWidth, outputHeight,
+            )
         }
         if (config.logoEnabled) logoBitmap?.let { logo ->
             val destination = LogoGeometry.destination(
@@ -113,9 +108,24 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         }
     }
 
+    /**
+     * Cantos no espaço da imagem que chegou. Em vídeo o marcado já é o espaço certo; em foto o JPEG
+     * é o quadro cheio do sensor, normalmente 4:3, e o que foi marcado veio do preview 16:9.
+     */
+    private fun cornersFor(
+        config: BroadcastConfiguration,
+        layer: OverlayLayer,
+        frame: Bitmap,
+    ): List<dev.cascam.geometry.NormalizedPoint> {
+        val corners = if (layer == OverlayLayer.SCOREBOARD) config.scoreboardCorners else config.clockCorners
+        return if (config.usesPhoto(layer)) {
+            StillFrameGeometry.fromVideoPreview(corners, frame.width, frame.height)
+        } else corners
+    }
+
+    /** Um recorte só: o retângulo 16:9 que o operador arrasta é a única fonte da verdade. */
     private fun drawCourt(canvas: Canvas, bitmap: Bitmap, config: BroadcastConfiguration, outputWidth: Int, outputHeight: Int) {
-        val configuredCrop = NormalizedRect.adjustable16x9(bitmap.width, bitmap.height, config.cropZoom, config.cropPanX, config.cropPanY)
-        val crop = CaptureZoomGeometry.fromZoomedPreview(configuredCrop, config.captureZoom)
+        val crop = NormalizedRect.adjustable16x9(bitmap.width, bitmap.height, config.cropZoom, config.cropPanX, config.cropPanY)
         val source = Rect(
             (crop.left * bitmap.width).toInt(), (crop.top * bitmap.height).toInt(),
             (crop.right * bitmap.width).toInt(), (crop.bottom * bitmap.height).toInt(),

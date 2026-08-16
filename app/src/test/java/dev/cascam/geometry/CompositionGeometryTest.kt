@@ -5,7 +5,7 @@ import dev.cascam.config.CaptureProfile
 import dev.cascam.config.CaptureSettings
 import dev.cascam.config.OverlayLayer
 import dev.cascam.config.OutputResolution
-import dev.cascam.config.ScoreboardSource
+import dev.cascam.config.OverlaySource
 import dev.cascam.camera.CameraCapabilities
 import dev.cascam.camera.CameraInfo
 import dev.cascam.camera.LensFacing
@@ -74,37 +74,19 @@ class CompositionGeometryTest {
         assertEquals(1f, mapped[2].x, .0001f)
     }
 
-    @Test fun `capture zoom maps preview coordinates into centered source crop`() {
-        val topLeft = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(0f, 0f), 2f)
-        val bottomRight = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(1f, 1f), 2f)
-
-        assertEquals(.25f, topLeft.x, .0001f)
-        assertEquals(.25f, topLeft.y, .0001f)
-        assertEquals(.75f, bottomRight.x, .0001f)
-        assertEquals(.75f, bottomRight.y, .0001f)
-    }
-
-    @Test fun `scoreboard geometry accepts twenty times digital zoom`() {
-        val topLeft = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(0f, 0f), 20f)
-        val bottomRight = CaptureZoomGeometry.fromZoomedPreview(NormalizedPoint(1f, 1f), 20f)
-
-        assertEquals(.5f - .5f / 20f, topLeft.x, .0001f)
-        assertEquals(.5f + .5f / 20f, bottomRight.x, .0001f)
-    }
-
-    @Test fun `photo mapping combines sixteen by nine crop and preview zoom`() {
-        val mapped = StillFrameGeometry.fromVideoPreview(
-            listOf(NormalizedPoint(0f, 0f)), 3648, 2736, 2f,
-        ).single()
+    @Test fun `marked corners survive as full frame coordinates`() {
+        // Sem zoom digital, o único remapeamento é o do preview 16:9 para o JPEG 4:3. A ampliação
+        // de tela não entra: ela é transformação de View e não muda coordenada nenhuma.
+        val mapped = StillFrameGeometry.fromVideoPreview(listOf(NormalizedPoint(.25f, 0f)), 3648, 2736).single()
 
         assertEquals(.25f, mapped.x, .0001f)
-        assertEquals(.3125f, mapped.y, .0001f)
+        assertEquals(.125f, mapped.y, .0001f)
     }
 
     @Test fun `photo source requires a camera dedicated to scoreboard`() {
         val dedicated = BroadcastConfiguration(
             courtCameraId = "wide", scoreboardCameraId = "tele",
-            scoreboardSource = ScoreboardSource.PHOTO_EVERY_SECOND,
+            scoreboardSource = OverlaySource.PHOTO_EVERY_SECOND,
         )
         val shared = dedicated.copy(scoreboardCameraId = "wide")
 
@@ -206,44 +188,50 @@ class CompositionGeometryTest {
         assertEquals(CaptureSettings(1920, 1080, 30), configuration.resolvedCaptureSettings("wide"))
     }
 
-    @Test fun `shared camera resolves the largest requested capture zoom`() {
-        val configuration = BroadcastConfiguration(
+    @Test fun `sharing a camera is reported so the screen can stop promising independence`() {
+        val shared = BroadcastConfiguration(
             courtCameraId = "shared",
             scoreboardCameraId = "shared",
             clockCameraId = "shared",
             scoreboardEnabled = true,
             clockEnabled = true,
-            captureZoom = 1.4f,
-            scoreboardCaptureZoom = 5f,
-            clockCaptureZoom = 2f,
         )
 
-        assertEquals(5f, configuration.resolvedCaptureZoom("shared"))
+        assertEquals(listOf("quadra", "cronômetro"), shared.layersSharingCameraWith(OverlayLayer.SCOREBOARD))
+        assertEquals(emptyList<String>(), shared.copy(
+            scoreboardCameraId = "tele", clockEnabled = false,
+        ).layersSharingCameraWith(OverlayLayer.SCOREBOARD))
     }
 
-    @Test fun `scoreboard capture zoom is limited to eight times`() {
-        val configuration = BroadcastConfiguration(
+    @Test fun `photo is available to the clock under the same exclusivity rule`() {
+        val dedicated = BroadcastConfiguration(
             courtCameraId = "wide",
-            scoreboardCameraId = "tele",
-            scoreboardCaptureZoom = 20f,
+            clockCameraId = "tele",
+            clockEnabled = true,
+            clockSource = OverlaySource.PHOTO_EVERY_SECOND,
         )
 
-        assertEquals(8f, configuration.resolvedCaptureZoom("tele"))
+        assertEquals(true, dedicated.usesPhoto(OverlayLayer.CLOCK))
+        assertEquals(1_000L, dedicated.stillIntervalFor("tele"))
+        // Dividir a câmera com o placar tira a foto das duas: a fonte inteira trocaria para JPEG.
+        val shared = dedicated.copy(scoreboardCameraId = "tele", scoreboardEnabled = true)
+        assertEquals(false, shared.usesPhoto(OverlayLayer.CLOCK))
+        assertEquals(0L, shared.stillIntervalFor("tele"))
     }
 
     @Test fun `court crop asks for more bitmap as the crop tightens`() {
         // Sensor 4:3: o recorte 16:9 aproveita a largura inteira, então sem zoom basta a saída
         // mais a folga. Cada passo de zoom multiplica a exigência na mesma proporção.
-        assertEquals(1600, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f, 1f))
-        assertEquals(3200, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 2f, 1f))
-        assertEquals(6400, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 2f, 2f))
+        assertEquals(1600, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f))
+        assertEquals(3200, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 2f))
+        assertEquals(6400, CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 4f))
     }
 
     @Test fun `court crop accounts for frames wider than the output`() {
         // Num quadro mais largo que 16:9 parte da largura já é descartada pelo enquadramento, e o
         // que sobra precisa cobrir a saída sozinho.
-        val wide = CompositionResolution.courtBitmapWidth(1280, 4000, 1500, 1f, 1f)
-        val standard = CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f, 1f)
+        val wide = CompositionResolution.courtBitmapWidth(1280, 4000, 1500, 1f)
+        val standard = CompositionResolution.courtBitmapWidth(1280, 4000, 3000, 1f)
         assertEquals(true, wide > standard)
     }
 
@@ -259,8 +247,8 @@ class CompositionGeometryTest {
         )
 
         // Destino de metade da saída a partir de metade da largura do quadro: 0,5 · 1280 · 1,25 / 0,5.
-        assertEquals(1600, CompositionResolution.overlayBitmapWidth(1280, destination, wideQuad, 1f))
-        assertEquals(3200, CompositionResolution.overlayBitmapWidth(1280, destination, tightQuad, 1f))
+        assertEquals(1600, CompositionResolution.overlayBitmapWidth(1280, destination, wideQuad))
+        assertEquals(3200, CompositionResolution.overlayBitmapWidth(1280, destination, tightQuad))
     }
 
     @Test fun `conversion width undoes the rotation applied after scaling`() {

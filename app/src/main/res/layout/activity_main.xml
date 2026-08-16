@@ -18,36 +18,46 @@
         app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintTop_toTopOf="parent">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/nav_broadcast" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="AO VIVO" />
-                <Button android:id="@+id/nav_video" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="VÍDEO" />
-                <Button android:id="@+id/nav_court" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="QUADRA" />
-                <Button android:id="@+id/nav_scoreboard" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="PLACAR" />
+                <Button android:id="@+id/nav_broadcast" style="@style/NavTab" android:text="AO VIVO" android:drawableTop="@drawable/ic_nav_live" />
+                <Button android:id="@+id/nav_youtube" style="@style/NavTab" android:text="YOUTUBE" android:drawableTop="@drawable/ic_nav_youtube" />
+                <Button android:id="@+id/nav_video" style="@style/NavTab" android:text="VÍDEO" android:drawableTop="@drawable/ic_nav_video" />
+                <Button android:id="@+id/nav_court" style="@style/NavTab" android:text="QUADRA" android:drawableTop="@drawable/ic_nav_court" />
             </LinearLayout>
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/nav_clock" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="CRONO" />
-                <Button android:id="@+id/nav_logo" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="ÍCONE" />
-                <Button android:id="@+id/nav_diagnostics" android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1" android:text="TESTE" />
+                <Button android:id="@+id/nav_scoreboard" style="@style/NavTab" android:text="PLACAR" android:drawableTop="@drawable/ic_nav_scoreboard" />
+                <Button android:id="@+id/nav_clock" style="@style/NavTab" android:text="CRONO" android:drawableTop="@drawable/ic_nav_clock" />
+                <Button android:id="@+id/nav_logo" style="@style/NavTab" android:text="ÍCONE" android:drawableTop="@drawable/ic_nav_logo" />
+                <Button android:id="@+id/nav_diagnostics" style="@style/NavTab" android:text="TESTE" android:drawableTop="@drawable/ic_nav_probe" />
             </LinearLayout>
         </LinearLayout>
 
         <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
             <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content">
                 <LinearLayout android:id="@+id/panel_broadcast" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                    <TextView style="@style/PanelTitle" android:text="Composição e transmissão" />
-                    <TextView style="@style/PanelLabel" android:text="Protocolo de ingestão" />
-                    <Spinner android:id="@+id/broadcast_protocol" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Composição" />
-                    <Spinner android:id="@+id/composition_engine" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView android:id="@+id/composition_hint" style="@style/PanelHint" android:text="CPU converte cada quadro e desenha em Canvas. GPU deixa a câmera escrever em textura e compõe em OpenGL, sem passar pelo processador." />
-                    <TextView style="@style/PanelLabel" android:text="Rotação da imagem" />
-                    <Spinner android:id="@+id/frame_rotation" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelHint" android:text="Vale somente para vídeo na composição GPU. Fotos nunca recebem esta rotação; em CPU o giro continua automático." />
-                    <TextView style="@style/PanelLabel" android:text="Resolução da câmera da quadra" />
-                    <Spinner android:id="@+id/capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="FPS da câmera da quadra" />
-                    <Spinner android:id="@+id/capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelHint" android:text="Cada lista mostra os valores anunciados pela câmera escolhida. Se duas camadas compartilham a câmera, vale o perfil mais exigente. O driver ainda pode recusar combinações simultâneas pesadas." />
-                    <TextView style="@style/PanelText" android:text="Confira o enquadramento verde e a área amarela do placar antes de entrar ao vivo." />
+                    <TextView style="@style/PanelTitle" android:text="Ao vivo" />
+                    <TextView style="@style/PanelText" android:text="Confira o enquadramento verde e a área amarela do placar antes de entrar ao vivo. Servidor, chave e autorização ficam na aba YOUTUBE." />
+                    <Button android:id="@+id/create_live" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="CRIAR LIVE E TRANSMITIR" />
+                    <LinearLayout android:id="@+id/live_link_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                        android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">
+                        <TextView style="@style/PanelLabel" android:layout_marginTop="0dp" android:text="Endereço desta live" />
+                        <TextView android:id="@+id/live_link" style="@style/PanelText" android:textIsSelectable="true" android:textColor="#73E2A7" android:text="—" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                            <Button android:id="@+id/open_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="ABRIR" />
+                            <Button android:id="@+id/check_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="VER STATUS" />
+                        </LinearLayout>
+                        <TextView android:id="@+id/live_health" style="@style/PanelHint" android:text="Toque em Ver status para saber por que ela ainda não apareceu." />
+                    </LinearLayout>
+                    <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="8dp" android:text="▶ INICIAR TRANSMISSÃO" />
+                    <TextView style="@style/PanelHint" android:text="Ao iniciar, câmera, microfone, codificação e envio permanecem ativos em primeiro plano — inclusive com a tela apagada — até você encerrar. Uma notificação persistente informa essa atividade." />
+                    <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
+                    <TextView android:id="@+id/thermal_status" style="@style/PanelHint" android:text="Temperatura: monitorando…" />
+                    <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="16dp" android:text="SALVAR TUDO" />
+                    <Button android:id="@+id/privacy_button" android:layout_width="match_parent" android:layout_height="48dp" android:text="PRIVACIDADE E USO EM SEGUNDO PLANO" />
+                </LinearLayout>
+
+                <LinearLayout android:id="@+id/panel_youtube" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+                    <TextView style="@style/PanelTitle" android:text="Conta do YouTube" />
+                    <TextView style="@style/PanelText" android:text="Configuração que se faz uma vez. O que você usa no dia do jogo está na aba AO VIVO." />
                     <TextView style="@style/PanelLabel" android:text="Servidor do YouTube" />
                     <EditText android:id="@+id/youtube_server" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:textColor="#FFFFFF" android:singleLine="true" />
                     <TextView style="@style/PanelLabel" android:text="Chave da transmissão" />
@@ -74,24 +84,8 @@
                             <Button android:id="@+id/open_oauth_page" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="ABRIR PÁGINA" />
                         </LinearLayout>
                     </LinearLayout>
-                    <Button android:id="@+id/create_live" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="2. CRIAR LIVE E TRANSMITIR" />
                     <TextView android:id="@+id/oauth_status" style="@style/PanelHint" android:text="OAuth ainda não configurado." />
-                    <LinearLayout android:id="@+id/live_link_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
-                        android:background="#121A24" android:padding="10dp" android:layout_marginTop="8dp" android:visibility="gone">
-                        <TextView style="@style/PanelLabel" android:layout_marginTop="0dp" android:text="Endereço desta live" />
-                        <TextView android:id="@+id/live_link" style="@style/PanelText" android:textIsSelectable="true" android:textColor="#73E2A7" android:text="—" />
-                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                            <Button android:id="@+id/open_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="ABRIR" />
-                            <Button android:id="@+id/check_live" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="VER STATUS" />
-                        </LinearLayout>
-                        <TextView android:id="@+id/live_health" style="@style/PanelHint" android:text="Toque em Ver status para saber por que ela ainda não apareceu." />
-                    </LinearLayout>
-                    <Button android:id="@+id/save_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Salvar" />
-                    <Button android:id="@+id/start_button" android:layout_width="match_parent" android:layout_height="64dp" android:text="▶ INICIAR TRANSMISSÃO" />
-                    <TextView style="@style/PanelHint" android:text="Ao iniciar, câmera, microfone, codificação e envio permanecem ativos em primeiro plano — inclusive com a tela apagada — até você encerrar. Uma notificação persistente informa essa atividade." />
-                    <Button android:id="@+id/privacy_button" android:layout_width="match_parent" android:layout_height="48dp" android:text="PRIVACIDADE E USO EM SEGUNDO PLANO" />
-                    <TextView android:id="@+id/broadcast_status" style="@style/PanelHint" android:text="Pronto para transmitir em RTMPS." />
-                    <TextView android:id="@+id/thermal_status" style="@style/PanelHint" android:text="Temperatura: monitorando…" />
+                    <Button android:id="@+id/save_youtube" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="SALVAR CONTA" />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_video" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
@@ -107,7 +101,16 @@
                     <TextView style="@style/PanelLabel" android:text="Uso de dados / bitrate" />
                     <Spinner android:id="@+id/bitrate_preset" android:layout_width="match_parent" android:layout_height="52dp" />
                     <TextView android:id="@+id/output_quality_hint" style="@style/PanelHint" android:text="720p30 · automático: 3 Mbps" />
-                    <Button android:id="@+id/save_video" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="SALVAR QUALIDADE" />
+                    <TextView style="@style/PanelLabel" android:text="Protocolo de ingestão" />
+                    <Spinner android:id="@+id/broadcast_protocol" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView style="@style/PanelHint" android:text="RTMPS aceita apenas H.264. Escolha HLS para enviar H.265." />
+                    <TextView style="@style/PanelLabel" android:text="Composição" />
+                    <Spinner android:id="@+id/composition_engine" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView android:id="@+id/composition_hint" style="@style/PanelHint" android:text="CPU converte cada quadro e desenha em Canvas. GPU deixa a câmera escrever em textura e compõe em OpenGL, sem passar pelo processador." />
+                    <TextView style="@style/PanelLabel" android:text="Rotação da imagem" />
+                    <Spinner android:id="@+id/frame_rotation" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView style="@style/PanelHint" android:text="Vale somente para vídeo na composição GPU. Fotos nunca recebem esta rotação; em CPU o giro continua automático." />
+                    <Button android:id="@+id/save_video" android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="12dp" android:text="SALVAR SAÍDA" />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_court" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
@@ -115,16 +118,21 @@
                     <TextView style="@style/PanelText" android:text="Verde: recorte 16:9 da quadra. Azul: destino do placar. Roxo: destino do cronômetro. Escolha abaixo qual destino será arrastado. A linha central indica o nível." />
                     <TextView style="@style/PanelLabel" android:text="Câmera da quadra" />
                     <Spinner android:id="@+id/court_camera" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Zoom digital da quadra" />
-                    <SeekBar android:id="@+id/court_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
-                    <TextView android:id="@+id/court_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
+                    <TextView style="@style/PanelLabel" android:text="Resolução desta fonte" />
+                    <Spinner android:id="@+id/capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
+                    <Spinner android:id="@+id/capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
+                    <TextView android:id="@+id/court_resolution_hint" style="@style/PanelHint" android:text="Capturar acima da resolução enviada dá margem para o recorte sair de pixel real." />
                     <TextView style="@style/PanelLabel" android:text="Sobreposição que será posicionada" />
                     <Spinner android:id="@+id/court_overlay" android:layout_width="match_parent" android:layout_height="48dp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
                         <Button android:id="@+id/crop_larger" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="− MAIS ÁREA" />
                         <Button android:id="@+id/crop_smaller" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="+ MENOS ÁREA" />
                     </LinearLayout>
-                    <TextView android:id="@+id/court_crop_status" style="@style/PanelHint" android:text="Zoom do recorte: 1.0×" />
+                    <TextView android:id="@+id/court_crop_status" style="@style/PanelHint" android:text="Recorte: 1.0×" />
+                    <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar o retângulo" />
+                    <SeekBar android:id="@+id/court_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="190" />
+                    <TextView android:id="@+id/court_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/panel_scoreboard" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
@@ -142,9 +150,7 @@
                     <Spinner android:id="@+id/scoreboard_capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
                     <Spinner android:id="@+id/scoreboard_capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Zoom digital do placar" />
-                    <SeekBar android:id="@+id/scoreboard_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
-                    <TextView android:id="@+id/scoreboard_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
+                    <TextView android:id="@+id/scoreboard_share_hint" style="@style/PanelHint" android:text="" android:visibility="gone" />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/scoreboard_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="190" />
                     <TextView android:id="@+id/scoreboard_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />
@@ -153,6 +159,11 @@
                 <LinearLayout android:id="@+id/panel_clock" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
                     <TextView style="@style/PanelTitle" android:text="Configurar cronômetro" />
                     <CheckBox android:id="@+id/clock_enabled" android:layout_width="match_parent" android:layout_height="48dp" android:text="Sobrepor cronômetro" android:textColor="#FFFFFF" />
+                    <TextView style="@style/PanelLabel" android:text="Fonte do cronômetro" />
+                    <Spinner android:id="@+id/clock_source" android:layout_width="match_parent" android:layout_height="52dp" />
+                    <TextView android:id="@+id/clock_source_hint" style="@style/PanelHint" android:text="Vídeo acompanha qualquer mudança do cronômetro." />
+                    <TextView android:id="@+id/clock_photo_interval_label" style="@style/PanelLabel" android:text="Intervalo entre fotos" android:visibility="gone" />
+                    <Spinner android:id="@+id/clock_photo_interval" android:layout_width="match_parent" android:layout_height="52dp" android:visibility="gone" />
                     <TextView style="@style/PanelText" android:text="Ajuste os quatro cantos do cronômetro filmado. Ele pode reutilizar a câmera da quadra ou do placar." />
                     <TextView style="@style/PanelLabel" android:text="Câmera do cronômetro" />
                     <Spinner android:id="@+id/clock_camera" android:layout_width="match_parent" android:layout_height="48dp" />
@@ -160,9 +171,7 @@
                     <Spinner android:id="@+id/clock_capture_resolution" android:layout_width="match_parent" android:layout_height="48dp" />
                     <TextView style="@style/PanelLabel" android:text="FPS desta fonte" />
                     <Spinner android:id="@+id/clock_capture_fps" android:layout_width="match_parent" android:layout_height="48dp" />
-                    <TextView style="@style/PanelLabel" android:text="Zoom digital do cronômetro" />
-                    <SeekBar android:id="@+id/clock_capture_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="70" />
-                    <TextView android:id="@+id/clock_capture_zoom_status" style="@style/PanelHint" android:text="Captura: 1,0× · aplicado antes da saída 1080p." />
+                    <TextView android:id="@+id/clock_share_hint" style="@style/PanelHint" android:text="" android:visibility="gone" />
                     <TextView style="@style/PanelLabel" android:text="Ampliar a tela para ajustar os cantos" />
                     <SeekBar android:id="@+id/clock_view_zoom" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="50" />
                     <TextView android:id="@+id/clock_view_zoom_status" style="@style/PanelHint" android:text="Tela: 1.0× · só amplia a visualização, não muda o que é transmitido." />

@@ -19,8 +19,8 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - projeto Android nativo (Kotlin, minSdk 31);
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
-- placar e cronômetro filmados opcionais, cada um com quadrilátero de quatro pontos
-  para planificar a origem e retângulo próprio de destino na composição;
+- placar e cronômetro opcionais, cada um com quadrilátero de quatro pontos para planificar a
+  origem, retângulo próprio de destino na composição e escolha entre vídeo e foto em alta;
 - seleção independente da câmera da quadra, do placar e do cronômetro, incluindo lentes traseiras,
   frontais e externas anunciadas pelo Android, identificadas pelo ângulo de visão em vez da focal
   em milímetros — num sensor de celular o milímetro só significaria algo com a equivalência de 35 mm,
@@ -31,20 +31,27 @@ Esta primeira fatia é propositalmente pequena, mas executável:
   operador. Camadas que compartilham câmera usam o perfil mais exigente entre elas;
 - saída configurável em 360p, 540p, 720p ou 1080p e 15, 20, 24, 30 ou 60 fps,
   independente do bitrate;
-- controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
-  servidor/chave do YouTube, persistidos localmente;
+- **um recorte real por fonte**, na geometria natural de cada uma: o retângulo 16:9 na quadra, o
+  quadrilátero de quatro pontos no placar e no cronômetro. Cada tela tem também uma lupa que só
+  amplia a visualização, para posicionar com precisão o que ocupa poucos pixels do quadro;
+- retângulo livre do placar na composição e servidor/chave do YouTube, persistidos localmente;
 - ícone opcional sobre a transmissão, carregado de PNG ou outra imagem, com transparência,
   posição e tamanho configuráveis e persistidos, além de opção para transformar fundo branco
   em transparente com borda suavizada;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
 - testes unitários para as regras geométricas.
 
-A interface é dividida em **Quadra**, onde o retângulo 16:9 é
-movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
-ajustados a área amarela capturada, a câmera e o zoom de visualização; **Cronômetro**,
-com os mesmos ajustes para a área roxa; **Ícone**, que mostra a composição enquanto
-ajusta a imagem, posição e tamanho; e **Ao vivo**, que reúne a composição e os
-dados do YouTube. A tela **Vídeo** escolhe resolução, FPS, codec e bitrate de saída.
+A interface tem oito telas, cada uma com um assunto só. As três fontes têm a mesma forma —
+câmera, resolução, FPS, recorte — porque são a mesma decisão tomada três vezes: **Quadra**, onde
+o retângulo 16:9 é movido por arraste e redimensionado pelas duas alças diagonais; **Placar**,
+onde se ajustam os quatro cantos da área amarela; e **Cronômetro**, com os mesmos ajustes para a
+área roxa e a mesma escolha entre vídeo e foto. **Ícone** mostra a composição enquanto ajusta
+imagem, posição e tamanho. **Vídeo** reúne o que sai do aparelho: resolução, FPS, codec, bitrate,
+protocolo de ingestão, motor de composição e rotação — protocolo fica ao lado do codec porque
+RTMPS aceita só H.264, e a restrição precisa estar visível onde ela é decidida. **YouTube** guarda
+a configuração que se faz uma vez: servidor, chave, OAuth, título, privacidade e latência.
+**Ao vivo** fica com o dia de jogo: criar a live, o link, iniciar e o status. **Teste** faz o
+diagnóstico das câmeras.
 O botão de play codifica a composição em H.264/H.265, faz a captura principal seguir
 o FPS de saída quando ela está em “Seguir saída”, captura o microfone em AAC mono a
 44,1 kHz e publica por RTMPS ou ingestão HLS. Quando o aparelho anuncia o grupo
