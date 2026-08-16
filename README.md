@@ -81,6 +81,13 @@ O botão alterna entre iniciar e encerrar a transmissão e mostra falhas de cone
 codificação na própria tela. A chave fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
 
+## A fazer
+
+O próximo trabalho está organizado em [`docs/roadmap.md`](docs/roadmap.md). A
+prioridade atual é permitir configurar e operar o SportCam remotamente pelo
+navegador, deixando o telefone enquadrado e dedicado à captura e à transmissão
+durante o jogo.
+
 ## Capturar acima da resolução transmitida
 
 A quadra não é enviada inteira: o que vai ao ar é um retângulo 16:9 recortado dela. Captura e saída
