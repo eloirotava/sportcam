@@ -33,7 +33,15 @@ class BroadcastService : Service() {
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .build()
-        startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        // dataSync entra junto por causa do acesso remoto: com o site ligado o aparelho continua
+        // atendendo o navegador e mantendo a sessão do túnel de pé mesmo antes de existir
+        // transmissão, e sem esse tipo o serviço não teria motivo declarado para isso.
+        startForeground(
+            ID, notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
         wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "cascam:broadcast").also { it.acquire() }
     }
 

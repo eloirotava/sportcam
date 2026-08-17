@@ -39,9 +39,15 @@ Esta primeira fatia é propositalmente pequena, mas executável:
   posição e tamanho configuráveis e persistidos, além de opção para transformar fundo branco
   em transparente com borda suavizada;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
-- testes unitários para as regras geométricas.
+- **configuração remota pelo navegador**: o app serve um site com as mesmas telas e abre um túnel
+  reverso [cf-p](https://github.com/eloirotava/cf-p) para alcançá-lo de outro aparelho, o que
+  resolve o celular no 4G do ginásio — atrás de CGNAT ele não tem endereço para receber conexão.
+  A transmissão não passa pelo túnel: o RTMPS continua saindo direto para o YouTube, e por ali só
+  trafega configuração em JSON e um JPEG de prévia quando o operador pede;
+- testes unitários para as regras geométricas, para a serialização da configuração, para o
+  servidor HTTP e para o protocolo do túnel.
 
-A interface tem oito telas, cada uma com um assunto só. As três fontes têm a mesma forma —
+A interface tem nove telas, cada uma com um assunto só. As três fontes têm a mesma forma —
 câmera, resolução, FPS, recorte — porque são a mesma decisão tomada três vezes: **Quadra**, onde
 o retângulo 16:9 é movido por arraste e redimensionado pelas duas alças diagonais; **Placar**,
 onde se ajustam os quatro cantos da área amarela; e **Cronômetro**, com os mesmos ajustes para a
@@ -51,7 +57,9 @@ protocolo de ingestão, motor de composição e rotação — protocolo fica ao 
 RTMPS aceita só H.264, e a restrição precisa estar visível onde ela é decidida. **YouTube** guarda
 a configuração que se faz uma vez: servidor, chave, OAuth, título, privacidade e latência.
 **Ao vivo** fica com o dia de jogo: criar a live, o link, iniciar e o status. **Teste** faz o
-diagnóstico das câmeras.
+diagnóstico das câmeras. **Remoto** liga o site e o túnel: porta, endereço e token do cf-p, usuário
+e senha de acesso — cinco campos digitados e uma chave só, porque o site sem túnel não teria como
+ser alcançado do outro lado do ginásio.
 O botão de play codifica a composição em H.264/H.265, faz a captura principal seguir
 o FPS de saída quando ela está em “Seguir saída”, captura o microfone em AAC mono a
 44,1 kHz e publica por RTMPS ou ingestão HLS. Quando o aparelho anuncia o grupo

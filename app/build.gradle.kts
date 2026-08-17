@@ -33,8 +33,8 @@ android {
         applicationId = "dev.cascam"
         minSdk = 31
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.0.9"
+        versionCode = 10
+        versionName = "0.0.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -79,4 +79,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraX")
     implementation("androidx.camera:camera-view:$cameraX")
     testImplementation("junit:junit:4.13.2")
+    // org.json vem do Android no aparelho, mas o android.jar dos testes unitários é o mockável:
+    // toda chamada lançaria "Stub!". Esta é a mesma implementação, só que de verdade, e vale
+    // apenas para os testes — o app continua usando a do sistema, sem nada a mais no APK.
+    testImplementation("org.json:json:20240303")
 }

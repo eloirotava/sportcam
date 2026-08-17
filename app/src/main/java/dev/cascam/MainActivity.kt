@@ -17,7 +17,10 @@ import android.hardware.camera2.CaptureRequest
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.view.PixelCopy
 import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
@@ -73,15 +76,26 @@ import dev.cascam.ui.YuvToBitmapConverter
 import dev.cascam.geometry.CompositionResolution
 import dev.cascam.geometry.WhiteTransparency
 import dev.cascam.stream.YoutubePublisher
+import dev.cascam.remote.HttpServer
+import dev.cascam.remote.RemoteBridge
+import dev.cascam.remote.RemoteRoutes
+import dev.cascam.tunnel.CfpTunnel
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import kotlin.math.atan2
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
-    private enum class Screen { BROADCAST, YOUTUBE, VIDEO, COURT, SCOREBOARD, CLOCK, LOGO, DIAGNOSTICS }
+    private enum class Screen { BROADCAST, YOUTUBE, VIDEO, COURT, SCOREBOARD, CLOCK, LOGO, DIAGNOSTICS, REMOTE }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var capabilities: CameraCapabilities
@@ -126,6 +140,18 @@ class MainActivity : AppCompatActivity() {
     private var logoBitmap: Bitmap? = null
     private val broadcastLifecycle = BroadcastLifecycleOwner()
     private var powerManager: PowerManager? = null
+    private var httpServer: HttpServer? = null
+    private var tunnel: CfpTunnel? = null
+    /** O que a tela Remoto mostra; também vai para o /api/status do site. */
+    @Volatile private var remoteStatus = "Acesso remoto desligado."
+    private var appliedRemoteSignature: String? = null
+    private val remoteConfigurationListener: (BroadcastConfiguration) -> Unit = { configuration ->
+        runOnUiThread {
+            configureForm(configuration)
+            applyCompositionConfiguration()
+            applyRemoteConfiguration(configuration)
+        }
+    }
     @Volatile private var thermalPhotoMinimumIntervalMillis = 0L
     private val thermalStatusListener = PowerManager.OnThermalStatusChangedListener { status -> applyThermalStatus(status) }
 
@@ -153,9 +179,12 @@ class MainActivity : AppCompatActivity() {
         store = BroadcastConfigurationStore(this)
         youtubeApi = YoutubeLiveApi(this)
         capabilities = CameraCapabilitiesReader.read(this)
-        configureForm(store.load())
+        val configuration = store.load()
+        configureForm(configuration)
         configureActions()
         startThermalMonitoring()
+        store.addListener(remoteConfigurationListener)
+        applyRemoteConfiguration(configuration)
         showScreen(Screen.BROADCAST)
         requestCameraIfNeeded()
     }
@@ -254,6 +283,13 @@ class MainActivity : AppCompatActivity() {
         binding.compositionOverlay.setClockCorners(configuration.clockCorners)
         binding.compositionOverlay.setClockDestination(configuration.clockDestination)
         binding.compositionOverlay.setEnabledOverlays(configuration.scoreboardEnabled, configuration.clockEnabled)
+        binding.remoteEnabled.isChecked = configuration.remoteEnabled
+        binding.remotePort.setText(configuration.remotePort.toString())
+        binding.remoteUser.setText(configuration.remoteUser)
+        binding.remotePassword.setText(configuration.remotePassword)
+        binding.tunnelUrl.setText(configuration.tunnelUrl)
+        binding.tunnelToken.setText(configuration.tunnelToken)
+        binding.remoteStatus.text = remoteStatus
         updateZoomLabels()
         updateLogoLabels()
         updateOutputQualityHint()
@@ -268,6 +304,14 @@ class MainActivity : AppCompatActivity() {
         binding.navClock.setOnClickListener { showScreen(Screen.CLOCK) }
         binding.navLogo.setOnClickListener { showScreen(Screen.LOGO) }
         binding.navDiagnostics.setOnClickListener { showScreen(Screen.DIAGNOSTICS) }
+        binding.navRemote.setOnClickListener { showScreen(Screen.REMOTE) }
+        binding.saveRemote.setOnClickListener {
+            saveConfiguration()
+            // Force: quem apertou o botão está justamente tentando de novo depois de um erro.
+            applyRemoteConfiguration(compositionConfiguration, force = true)
+            toast("Acesso remoto salvo")
+        }
+        binding.tunnelUrl.setOnFocusChangeListener { _, focused -> if (!focused) splitPastedTunnelCommand() }
         binding.runProbe.setOnClickListener { toggleProbe() }
         binding.copyProbeReport.setOnClickListener { copyProbeReport() }
         binding.runPhotoProbe.setOnClickListener { togglePhotoProbe() }
@@ -428,6 +472,7 @@ class MainActivity : AppCompatActivity() {
             Screen.CLOCK to binding.navClock,
             Screen.LOGO to binding.navLogo,
             Screen.DIAGNOSTICS to binding.navDiagnostics,
+            Screen.REMOTE to binding.navRemote,
         ).forEach { (screen, tab) -> tab.isSelected = screen == target }
     }
 
@@ -445,6 +490,7 @@ class MainActivity : AppCompatActivity() {
         binding.panelClock.visibility = if (target == Screen.CLOCK) View.VISIBLE else View.GONE
         binding.panelLogo.visibility = if (target == Screen.LOGO) View.VISIBLE else View.GONE
         binding.panelDiagnostics.visibility = if (target == Screen.DIAGNOSTICS) View.VISIBLE else View.GONE
+        binding.panelRemote.visibility = if (target == Screen.REMOTE) View.VISIBLE else View.GONE
         markSelectedTab(target)
         when (target) {
             Screen.BROADCAST -> CompositionOverlayView.Mode.COMPOSITION
@@ -454,11 +500,14 @@ class MainActivity : AppCompatActivity() {
             Screen.SCOREBOARD -> CompositionOverlayView.Mode.SCOREBOARD
             Screen.CLOCK -> CompositionOverlayView.Mode.CLOCK
             Screen.LOGO -> CompositionOverlayView.Mode.COMPOSITION
+            // A tela Remoto mantém a composição rodando de propósito: é ela que alimenta as
+            // prévias do site, e é nela que o telefone fica quando o ajuste é feito de longe.
+            Screen.REMOTE -> CompositionOverlayView.Mode.COMPOSITION
             Screen.DIAGNOSTICS -> null
         }?.let(binding.compositionOverlay::setMode)
-        binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS || target == Screen.LOGO || target == Screen.VIDEO || target == Screen.YOUTUBE) View.GONE else View.VISIBLE
+        binding.compositionOverlay.visibility = if (target == Screen.DIAGNOSTICS || target == Screen.LOGO || target == Screen.VIDEO || target == Screen.YOUTUBE || target == Screen.REMOTE) View.GONE else View.VISIBLE
         val gpuComposition = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition] == CompositionEngine.GPU
-        val compositionScreen = target == Screen.BROADCAST || target == Screen.LOGO || target == Screen.VIDEO || target == Screen.YOUTUBE
+        val compositionScreen = target == Screen.BROADCAST || target == Screen.LOGO || target == Screen.VIDEO || target == Screen.YOUTUBE || target == Screen.REMOTE
         binding.composedOutput.visibility = if (compositionScreen && !gpuComposition) View.VISIBLE else View.GONE
         binding.gpuOutput.visibility = if (compositionScreen && gpuComposition) View.VISIBLE else View.GONE
         binding.preview.visibility = if (compositionScreen || target == Screen.DIAGNOSTICS) View.GONE else View.VISIBLE
@@ -470,6 +519,7 @@ class MainActivity : AppCompatActivity() {
             Screen.YOUTUBE -> startCompositionPreview()
             Screen.VIDEO -> startCompositionPreview()
             Screen.LOGO -> startCompositionPreview()
+            Screen.REMOTE -> startCompositionPreview()
             // O teste precisa das câmeras livres: qualquer bind anterior seria confundido com falha do par.
             Screen.DIAGNOSTICS -> releaseCameras()
             else -> startCamera(cameraIdFor(target))
@@ -482,7 +532,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cameraIdFor(target: Screen): String? = when (target) {
-        Screen.BROADCAST, Screen.YOUTUBE, Screen.VIDEO, Screen.COURT, Screen.LOGO -> cameraIds.getOrNull(binding.courtCamera.selectedItemPosition)
+        Screen.BROADCAST, Screen.YOUTUBE, Screen.VIDEO, Screen.COURT, Screen.LOGO, Screen.REMOTE ->
+            cameraIds.getOrNull(binding.courtCamera.selectedItemPosition)
         Screen.SCOREBOARD -> cameraIds.getOrNull(binding.scoreboardCamera.selectedItemPosition)
         Screen.CLOCK -> cameraIds.getOrNull(binding.clockCamera.selectedItemPosition)
         Screen.DIAGNOSTICS -> null
@@ -620,6 +671,12 @@ class MainActivity : AppCompatActivity() {
             liveLatency = LiveLatency.entries[binding.liveLatency.selectedItemPosition],
             compositionEngine = CompositionEngine.entries[binding.compositionEngine.selectedItemPosition],
             frameRotation = FrameRotation.entries[binding.frameRotation.selectedItemPosition],
+            remoteEnabled = binding.remoteEnabled.isChecked,
+            remotePort = binding.remotePort.text.toString().trim().toIntOrNull()?.takeIf { it in 1024..65535 } ?: 8080,
+            remoteUser = binding.remoteUser.text.toString().trim().ifBlank { "sportcam" },
+            remotePassword = binding.remotePassword.text.toString(),
+            tunnelUrl = binding.tunnelUrl.text.toString().trim(),
+            tunnelToken = binding.tunnelToken.text.toString().trim(),
         )
     }
 
@@ -1078,7 +1135,7 @@ class MainActivity : AppCompatActivity() {
                     binding.composedOutput.onComposedFrame = null
                     binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
                     setCaptureControlsEnabled(true)
-                    stopService(Intent(this, BroadcastService::class.java))
+                    updateForegroundService()
                     Thread { failedPublisher?.close() }.start()
                 }
             }
@@ -1097,7 +1154,7 @@ class MainActivity : AppCompatActivity() {
         encoderSurface?.let { surface -> compositor?.removeTarget(surface) }
         encoderSurface = null
         active.close()
-        stopService(Intent(this, BroadcastService::class.java))
+        updateForegroundService()
         binding.startButton.text = "▶ INICIAR TRANSMISSÃO"
         setCaptureControlsEnabled(true)
     }
@@ -1745,6 +1802,243 @@ class MainActivity : AppCompatActivity() {
         binding.compositionOverlay.setLevelDegrees(null)
     }
 
+    // ---------------------------------------------------------------- acesso remoto
+
+    /**
+     * Sobe ou derruba o site e o túnel conforme a configuração. Os dois andam juntos: o site
+     * escuta para o túnel alcançá-lo, e o túnel sem site não teria o que publicar.
+     *
+     * Só reinicia quando algo do próprio acesso remoto mudou. Sem essa comparação, salvar o
+     * recorte da quadra pelo navegador derrubaria o servidor no meio da resposta — o site
+     * cortaria a própria conexão a cada ajuste.
+     */
+    private fun applyRemoteConfiguration(configuration: BroadcastConfiguration, force: Boolean = false) {
+        val signature = with(configuration) {
+            listOf(remoteEnabled, remotePort, remoteUser, remotePassword, tunnelUrl, tunnelToken).joinToString("|")
+        }
+        if (!force && signature == appliedRemoteSignature) return
+        appliedRemoteSignature = signature
+        httpServer?.close()
+        httpServer = null
+        tunnel?.close()
+        tunnel = null
+        if (!configuration.remoteEnabled) {
+            updateRemoteStatus("Acesso remoto desligado.")
+            updateForegroundService()
+            return
+        }
+        if (!configuration.remoteReady) {
+            updateRemoteStatus("Defina uma senha e uma porta entre 1024 e 65535 para ligar o site.")
+            updateForegroundService()
+            return
+        }
+        val server = HttpServer(
+            configuration.remotePort,
+            RemoteRoutes(assets, RemoteBridgeImpl())::handle,
+        ) { status -> updateRemoteStatus(status) }
+        val opened = runCatching { server.start() }
+        if (opened.isFailure) {
+            updateRemoteStatus("Não consegui abrir a porta ${configuration.remotePort}: ${opened.exceptionOrNull()?.message}")
+            updateForegroundService()
+            return
+        }
+        httpServer = server
+        updateForegroundService()
+        if (!configuration.tunnelReady) {
+            updateRemoteStatus("Site no ar na porta ${configuration.remotePort}. Sem endereço wss:// e token do cf-p ele só responde nesta rede.")
+            return
+        }
+        tunnel = CfpTunnel(
+            configuration.tunnelUrl, configuration.tunnelToken, configuration.remotePort,
+        ) { status -> updateRemoteStatus(status) }.also { it.start() }
+    }
+
+    private fun updateRemoteStatus(status: String) {
+        remoteStatus = status
+        runOnUiThread { binding.remoteStatus.text = status }
+    }
+
+    /**
+     * O serviço em primeiro plano agora tem dois motivos para existir: a transmissão e o acesso
+     * remoto. Sem ele, com a tela apagada o sistema pode recolher o processo — e o site pararia
+     * de responder justamente quando o telefone já está no tripé e ninguém quer tocá-lo.
+     */
+    private fun updateForegroundService() {
+        if (publisher != null || httpServer != null) {
+            ContextCompat.startForegroundService(this, Intent(this, BroadcastService::class.java))
+        } else {
+            stopService(Intent(this, BroadcastService::class.java))
+        }
+    }
+
+    /**
+     * O painel do cf-p mostra a linha de comando pronta com as duas variáveis. Colá-la inteira no
+     * campo do endereço é mais rápido — e bem menos sujeito a erro — do que digitar 64 caracteres
+     * hexadecimais no teclado do celular.
+     */
+    private fun splitPastedTunnelCommand() {
+        val pasted = binding.tunnelUrl.text.toString()
+        if (!pasted.contains("CFP_TOKEN")) return
+        val server = TUNNEL_SERVER_PATTERN.find(pasted)?.groupValues?.get(1)
+        val token = TUNNEL_TOKEN_PATTERN.find(pasted)?.groupValues?.get(1)
+        if (server == null && token == null) return
+        server?.let(binding.tunnelUrl::setText)
+        token?.let(binding.tunnelToken::setText)
+        toast("Endereço e token separados da linha colada")
+    }
+
+    /**
+     * O servidor HTTP responde nas próprias threads, e a composição só existe na thread da
+     * interface. Este salto é o que deixa servir uma prévia sem tocar em view fora dela. O tempo
+     * limite existe para uma interface ocupada não segurar a conexão do navegador para sempre.
+     */
+    private fun <T> onUiThread(block: () -> T): T {
+        if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        val slot = ArrayBlockingQueue<Result<T>>(1)
+        runOnUiThread { slot.offer(runCatching(block)) }
+        val result = slot.poll(UI_ANSWER_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            ?: error("A tela do aparelho não respondeu a tempo")
+        return result.getOrThrow()
+    }
+
+    private fun sourceSnapshot(source: String): Bitmap? = when (source) {
+        "court" -> binding.composedOutput.sourceSnapshot(null)
+        "scoreboard" -> binding.composedOutput.sourceSnapshot(OverlayLayer.SCOREBOARD)
+        "clock" -> binding.composedOutput.sourceSnapshot(OverlayLayer.CLOCK)
+        else -> null
+    }
+
+    /**
+     * Em CPU a composição já existe num bitmap próprio. Em GPU ela só existe na superfície do
+     * compositor, que não tem leitura de volta — `PixelCopy` sobre a SurfaceView é o caminho que
+     * não exige abrir uma superfície offscreen no GlCompositor.
+     *
+     * A cópia é pedida fora da thread da interface de propósito: o retorno do PixelCopy chega por
+     * ela, e esperar nela pelo próprio retorno seria travar uma na outra.
+     */
+    private fun composedSnapshot(): Bitmap? {
+        if (onUiThread { compositionConfiguration.compositionEngine } != CompositionEngine.GPU) {
+            return onUiThread { binding.composedOutput.compositionSnapshot() }
+        }
+        val prepared = onUiThread {
+            val view = binding.gpuOutput
+            if (view.width <= 0 || view.height <= 0 || !view.holder.surface.isValid) null
+            else view to Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        } ?: return null
+        val (view, bitmap) = prepared
+        val done = CountDownLatch(1)
+        val copied = AtomicBoolean()
+        PixelCopy.request(view, bitmap, { result ->
+            copied.set(result == PixelCopy.SUCCESS)
+            done.countDown()
+        }, Handler(Looper.getMainLooper()))
+        if (!done.await(UI_ANSWER_TIMEOUT_SECONDS, TimeUnit.SECONDS) || !copied.get()) {
+            bitmap.recycle()
+            return null
+        }
+        return bitmap
+    }
+
+    private inner class RemoteBridgeImpl : RemoteBridge {
+        override fun configuration(): BroadcastConfiguration = store.load()
+
+        override fun applyConfiguration(configuration: BroadcastConfiguration) =
+            store.saveFromRemote(configuration)
+
+        override fun capabilitiesJson(): JSONObject {
+            val cameras = JSONArray()
+            val sizes = JSONObject()
+            val rates = JSONObject()
+            capabilities.cameras.forEach { camera ->
+                val kind = if (camera.physicalCameraId == null) "Lógica" else "Física"
+                cameras.put(
+                    JSONObject()
+                        .put("id", camera.id)
+                        .put("label", "$kind ${camera.id} · ${camera.lensFacing.label} · ${camera.lensLabel}"),
+                )
+                sizes.put(camera.id, JSONArray().apply {
+                    camera.captureSizes.forEach {
+                        put(JSONObject().put("width", it.size.width).put("height", it.size.height).put("label", it.label))
+                    }
+                })
+                rates.put(camera.id, JSONArray().apply {
+                    camera.fpsRanges.map { it.upper }.distinct().sorted().forEach { put(it) }
+                })
+            }
+            val enums = JSONObject()
+                .put("protocol", options(BroadcastProtocol.entries.map { it.name to it.label }))
+                .put("videoCodec", options(VideoCodec.entries.map { it.name to it.label }))
+                .put("outputResolution", options(OutputResolution.entries.map { it.name to it.label }))
+                .put("bitratePreset", options(BitratePreset.entries.map { it.name to it.label }))
+                .put("compositionEngine", options(CompositionEngine.entries.map { it.name to it.label }))
+                .put("frameRotation", options(FrameRotation.entries.map { it.name to it.label }))
+                .put("livePrivacy", options(LivePrivacy.entries.map { it.name to it.label }))
+                .put("liveLatency", options(LiveLatency.entries.map { it.name to it.label }))
+                .put("overlaySource", options(OverlaySource.entries.map { it.name to it.label }))
+                .put("outputFps", options(OUTPUT_FPS_OPTIONS.map { it to "$it fps" }))
+                .put("photoInterval", options(PHOTO_INTERVAL_OPTIONS_MILLIS.map { it to photoIntervalLabel(it) }))
+            return JSONObject()
+                .put("cameras", cameras)
+                .put("captureSizes", sizes)
+                .put("captureFps", rates)
+                .put("enums", enums)
+        }
+
+        private fun options(values: List<Pair<Any, String>>) = JSONArray().apply {
+            values.forEach { (value, label) -> put(JSONObject().put("value", value).put("label", label)) }
+        }
+
+        override fun statusJson(): JSONObject = onUiThread {
+            JSONObject()
+                .put("transmitindo", publisher != null)
+                .put("live", ingestion?.watchUrl.orEmpty())
+                .put("remoto", remoteStatus)
+                .put(
+                    "mensagem",
+                    listOf(binding.broadcastStatus.text, binding.liveHealth.text, remoteStatus)
+                        .map(CharSequence::toString).filter(String::isNotBlank).joinToString("\n"),
+                )
+        }
+
+        override fun previewJpeg(source: String): ByteArray? {
+            val bitmap = if (source == "composed") composedSnapshot() else onUiThread { sourceSnapshot(source) }
+            if (bitmap == null) return null
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, PREVIEW_JPEG_QUALITY, stream)
+            bitmap.recycle()
+            return stream.toByteArray()
+        }
+
+        override fun command(name: String): String = onUiThread {
+            when (name) {
+                "live/create" -> { createLiveAndBroadcast(); "Criando a live no YouTube…" }
+                "live/toggle" -> { toggleBroadcast(); if (publisher != null) "Transmissão iniciada." else "Transmissão encerrada." }
+                "live/status" -> { checkLiveHealth(); binding.liveHealth.text.toString() }
+                "youtube/authorize" -> { authorizeYoutube(); binding.oauthStatus.text.toString() }
+                "probe/cameras" -> { toggleProbe(); binding.probeStatus.text.toString() }
+                "probe/photo" -> { togglePhotoProbe(); binding.photoProbeStatus.text.toString() }
+                "probe/report" -> listOf(probeReport, photoProbeReport)
+                    .filter(String::isNotBlank).joinToString("\n\n")
+                    .ifBlank { "Nenhum teste executado ainda." }
+                else -> "Comando desconhecido: $name"
+            }
+        }
+
+        override fun replaceLogo(bytes: ByteArray): String {
+            val file = File(filesDir, "remote-logo.png")
+            val written = runCatching { file.writeBytes(bytes) }
+            if (written.isFailure) return "Não consegui gravar a imagem: ${written.exceptionOrNull()?.message}"
+            return onUiThread {
+                logoUri = Uri.fromFile(file).toString()
+                binding.logoEnabled.isChecked = true
+                loadLogo(logoUri)
+                saveConfiguration()
+                logoBitmap?.let { "Ícone atualizado · ${it.width}×${it.height} px" }
+                    ?: "Recebi o arquivo, mas não consegui decodificar a imagem."
+            }
+        }
+    }
+
     override fun onPause() {
         stopLevelSensor()
         super.onPause()
@@ -1768,6 +2062,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopLevelSensor()
+        store.removeListener(remoteConfigurationListener)
+        httpServer?.close()
+        httpServer = null
+        tunnel?.close()
+        tunnel = null
         powerManager?.removeThermalStatusListener(thermalStatusListener)
         powerManager = null
         probe?.shutdown()
@@ -1802,5 +2101,11 @@ class MainActivity : AppCompatActivity() {
         val FALLBACK_DUAL_SENSOR_CEILING = android.util.Size(1920, 1080)
         val OUTPUT_FPS_OPTIONS = listOf(15, 20, 24, 30, 60)
         const val PRIVACY_POLICY_URL = "https://github.com/eloirotava/sportcam/blob/main/docs/privacy-policy.md"
+
+        /** Prévia é para conferir enquadramento, não para julgar qualidade; 80 já é generoso. */
+        const val PREVIEW_JPEG_QUALITY = 80
+        const val UI_ANSWER_TIMEOUT_SECONDS = 10L
+        val TUNNEL_SERVER_PATTERN = Regex("""CFP_SERVER=["']?([^"'\s]+)""")
+        val TUNNEL_TOKEN_PATTERN = Regex("""CFP_TOKEN=["']?([^"'\s]+)""")
     }
 }

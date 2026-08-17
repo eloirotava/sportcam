@@ -64,6 +64,27 @@ class ComposedOutputView @JvmOverloads constructor(context: Context, attrs: Attr
         render(canvas, width, height)
     }
 
+    /**
+     * Cópia do último quadro cru de uma fonte, para o site servir uma prévia de enquadramento. É o
+     * quadro inteiro, sem recorte e sem homografia: é sobre ele que o navegador desenha o retângulo
+     * da quadra e os quatro cantos das sobreposições.
+     *
+     * Precisa ser chamado na thread da view — os `submit*` reciclam o bitmap anterior por ela.
+     */
+    fun sourceSnapshot(layer: OverlayLayer?): Bitmap? = when (layer) {
+        null -> courtFrame
+        OverlayLayer.SCOREBOARD -> scoreboardFrame
+        OverlayLayer.CLOCK -> clockFrame
+    }?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false)
+
+    /** A composição inteira num bitmap próprio, na resolução de saída. */
+    fun compositionSnapshot(): Bitmap {
+        val resolution = configuration.outputResolution
+        val output = Bitmap.createBitmap(resolution.width, resolution.height, Bitmap.Config.ARGB_8888)
+        render(Canvas(output), output.width, output.height)
+        return output
+    }
+
     private fun exportFrameIfNeeded() {
         val now = System.nanoTime()
         if (onComposedFrame != null && now - lastExportNanos >= exportIntervalNanos) {

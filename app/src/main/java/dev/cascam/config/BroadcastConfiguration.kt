@@ -52,7 +52,24 @@ data class BroadcastConfiguration(
     val liveLatency: LiveLatency = LiveLatency.LOW,
     val compositionEngine: CompositionEngine = CompositionEngine.CPU,
     val frameRotation: FrameRotation = FrameRotation.AUTO,
+    /**
+     * Configuração remota. O site é servido pelo próprio aparelho e alcançado pelo túnel cf-p, que
+     * é o que resolve o celular no 4G do ginásio: atrás de CGNAT ele não tem endereço para receber
+     * conexão, e sem túnel reverso não existe caminho até ele. A transmissão não passa por aqui —
+     * o RTMPS continua saindo direto para o YouTube.
+     */
+    val remoteEnabled: Boolean = false,
+    val remotePort: Int = 8080,
+    val remoteUser: String = "sportcam",
+    val remotePassword: String = "",
+    val tunnelUrl: String = "",
+    val tunnelToken: String = "",
 ) {
+    /** Só vale ligar o remoto com senha: o site expõe a chave do YouTube e o botão de transmitir. */
+    val remoteReady: Boolean get() = remoteEnabled && remotePassword.isNotBlank() && remotePort in 1024..65535
+
+    val tunnelReady: Boolean get() = remoteReady && tunnelUrl.startsWith("wss://") && tunnelToken.isNotBlank()
+
     /** Câmeras distintas necessárias; camadas podem compartilhar a mesma fonte. */
     fun requiredCameraIds(): Set<String> = buildSet {
         courtCameraId.takeIf(String::isNotBlank)?.let(::add)

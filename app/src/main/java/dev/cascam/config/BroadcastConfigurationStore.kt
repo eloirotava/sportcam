@@ -6,6 +6,7 @@ import dev.cascam.geometry.NormalizedRect
 
 class BroadcastConfigurationStore(context: Context) {
     private val preferences = context.getSharedPreferences("broadcast_configuration", Context.MODE_PRIVATE)
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(BroadcastConfiguration) -> Unit>()
 
     fun load(): BroadcastConfiguration = BroadcastConfiguration(
         courtCameraId = preferences.getString("court_camera", "").orEmpty(),
@@ -76,6 +77,12 @@ class BroadcastConfigurationStore(context: Context) {
         frameRotation = runCatching {
             FrameRotation.valueOf(preferences.getString("frame_rotation", null).orEmpty())
         }.getOrDefault(FrameRotation.AUTO),
+        remoteEnabled = preferences.getBoolean("remote_enabled", false),
+        remotePort = preferences.getInt("remote_port", 8080).takeIf { it in 1024..65535 } ?: 8080,
+        remoteUser = preferences.getString("remote_user", "sportcam").orEmpty().ifBlank { "sportcam" },
+        remotePassword = preferences.getString("remote_password", "").orEmpty(),
+        tunnelUrl = preferences.getString("tunnel_url", "").orEmpty(),
+        tunnelToken = preferences.getString("tunnel_token", "").orEmpty(),
     )
 
     fun save(configuration: BroadcastConfiguration) {
@@ -125,7 +132,31 @@ class BroadcastConfigurationStore(context: Context) {
             .putString("live_latency", configuration.liveLatency.name)
             .putString("composition_engine", configuration.compositionEngine.name)
             .putString("frame_rotation", configuration.frameRotation.name)
+            .putBoolean("remote_enabled", configuration.remoteEnabled)
+            .putInt("remote_port", configuration.remotePort)
+            .putString("remote_user", configuration.remoteUser)
+            .putString("remote_password", configuration.remotePassword)
+            .putString("tunnel_url", configuration.tunnelUrl)
+            .putString("tunnel_token", configuration.tunnelToken)
             .apply()
+    }
+
+    /**
+     * Salva o que chegou pelo site e avisa quem estiver mostrando a configuração na tela do
+     * aparelho. O caminho do próprio app não passa por aqui de propósito: quem mexeu no formulário
+     * já tem os widgets no estado certo, e reaplicá-los por cima desfaria a edição em andamento.
+     */
+    fun saveFromRemote(configuration: BroadcastConfiguration) {
+        save(configuration)
+        listeners.forEach { listener -> runCatching { listener(configuration) } }
+    }
+
+    fun addListener(listener: (BroadcastConfiguration) -> Unit) {
+        listeners += listener
+    }
+
+    fun removeListener(listener: (BroadcastConfiguration) -> Unit) {
+        listeners -= listener
     }
 
     private fun decodeCorners(
