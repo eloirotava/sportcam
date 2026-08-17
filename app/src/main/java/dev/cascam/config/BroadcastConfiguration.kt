@@ -7,7 +7,7 @@ data class BroadcastConfiguration(
     val courtCameraId: String = "",
     val scoreboardCameraId: String = "",
     val scoreboardEnabled: Boolean = true,
-    val scoreboardSource: ScoreboardSource = ScoreboardSource.VIDEO,
+    val scoreboardSource: OverlaySource = OverlaySource.VIDEO,
     /** Intervalo base entre fotos; a proteção térmica pode aumentá-lo temporariamente. */
     val scoreboardPhotoIntervalMillis: Long = 1_000L,
     val cropZoom: Float = 1f,
@@ -17,21 +17,20 @@ data class BroadcastConfiguration(
     val scoreboardDestination: NormalizedRect = DEFAULT_SCOREBOARD_DESTINATION,
     val clockCameraId: String = "",
     val clockEnabled: Boolean = false,
+    val clockSource: OverlaySource = OverlaySource.VIDEO,
+    val clockPhotoIntervalMillis: Long = 1_000L,
     val clockCorners: List<NormalizedPoint> = DEFAULT_CLOCK_CORNERS,
     val clockDestination: NormalizedRect = DEFAULT_CLOCK_DESTINATION,
     /** Zero mantém a escolha automática até o diagnóstico fornecer perfis aprovados. */
     val captureWidth: Int = 0,
     val captureHeight: Int = 0,
     val captureFps: Int = 0,
-    val captureZoom: Float = 1f,
     val scoreboardCaptureWidth: Int = 0,
     val scoreboardCaptureHeight: Int = 0,
     val scoreboardCaptureFps: Int = 0,
-    val scoreboardCaptureZoom: Float = 1f,
     val clockCaptureWidth: Int = 0,
     val clockCaptureHeight: Int = 0,
     val clockCaptureFps: Int = 0,
-    val clockCaptureZoom: Float = 1f,
     val logoUri: String = "",
     val logoEnabled: Boolean = false,
     val logoWhiteTransparent: Boolean = false,
@@ -53,7 +52,24 @@ data class BroadcastConfiguration(
     val liveLatency: LiveLatency = LiveLatency.LOW,
     val compositionEngine: CompositionEngine = CompositionEngine.CPU,
     val frameRotation: FrameRotation = FrameRotation.AUTO,
+    /**
+     * Configuração remota. O site é servido pelo próprio aparelho e alcançado pelo túnel cf-p, que
+     * é o que resolve o celular no 4G do ginásio: atrás de CGNAT ele não tem endereço para receber
+     * conexão, e sem túnel reverso não existe caminho até ele. A transmissão não passa por aqui —
+     * o RTMPS continua saindo direto para o YouTube.
+     */
+    val remoteEnabled: Boolean = false,
+    val remotePort: Int = 8080,
+    val remoteUser: String = "sportcam",
+    val remotePassword: String = "",
+    val tunnelUrl: String = "",
+    val tunnelToken: String = "",
 ) {
+    /** Só vale ligar o remoto com senha: o site expõe a chave do YouTube e o botão de transmitir. */
+    val remoteReady: Boolean get() = remoteEnabled && remotePassword.isNotBlank() && remotePort in 1024..65535
+
+    val tunnelReady: Boolean get() = remoteReady && tunnelUrl.startsWith("wss://") && tunnelToken.isNotBlank()
+
     /** Câmeras distintas necessárias; camadas podem compartilhar a mesma fonte. */
     fun requiredCameraIds(): Set<String> = buildSet {
         courtCameraId.takeIf(String::isNotBlank)?.let(::add)
@@ -66,16 +82,42 @@ data class BroadcastConfiguration(
         OverlayLayer.CLOCK -> clockCameraId
     }.ifBlank { courtCameraId }
 
-    fun canUseScoreboardPhoto(): Boolean {
-        val scoreboard = cameraIdFor(OverlayLayer.SCOREBOARD)
-        return scoreboardEnabled && scoreboard != courtCameraId &&
-            (!clockEnabled || cameraIdFor(OverlayLayer.CLOCK) != scoreboard)
+    fun enabled(layer: OverlayLayer): Boolean = when (layer) {
+        OverlayLayer.SCOREBOARD -> scoreboardEnabled
+        OverlayLayer.CLOCK -> clockEnabled
     }
 
-    fun stillIntervalFor(cameraId: String): Long = if (
-        scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && canUseScoreboardPhoto() &&
-        cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId
-    ) scoreboardPhotoIntervalMillis.coerceIn(1_000L, 30_000L) else 0L
+    fun sourceFor(layer: OverlayLayer): OverlaySource = when (layer) {
+        OverlayLayer.SCOREBOARD -> scoreboardSource
+        OverlayLayer.CLOCK -> clockSource
+    }
+
+    fun photoIntervalFor(layer: OverlayLayer): Long = when (layer) {
+        OverlayLayer.SCOREBOARD -> scoreboardPhotoIntervalMillis
+        OverlayLayer.CLOCK -> clockPhotoIntervalMillis
+    }
+
+    /**
+     * Foto exige câmera exclusiva porque a fonte inteira troca de vídeo para JPEG: quem
+     * compartilhasse a câmera ficaria sem quadros de vídeo. Vale para as duas sobreposições.
+     */
+    fun canUsePhoto(layer: OverlayLayer): Boolean {
+        if (!enabled(layer)) return false
+        val camera = cameraIdFor(layer)
+        if (camera.isBlank() || camera == courtCameraId) return false
+        val other = OverlayLayer.entries.first { it != layer }
+        return !enabled(other) || cameraIdFor(other) != camera
+    }
+
+    fun usesPhoto(layer: OverlayLayer): Boolean =
+        sourceFor(layer) == OverlaySource.PHOTO_EVERY_SECOND && canUsePhoto(layer)
+
+    /** Camada cuja foto sai desta câmera, quando existe; é ela que dá a geometria do JPEG. */
+    fun photoLayerFor(cameraId: String): OverlayLayer? =
+        OverlayLayer.entries.firstOrNull { usesPhoto(it) && cameraIdFor(it) == cameraId }
+
+    fun stillIntervalFor(cameraId: String): Long = photoLayerFor(cameraId)
+        ?.let { photoIntervalFor(it).coerceIn(1_000L, 30_000L) } ?: 0L
 
     val requestedCaptureProfile: CaptureProfile?
         get() = if (captureWidth > 0 && captureHeight > 0 && captureFps > 0) {
@@ -101,12 +143,21 @@ data class BroadcastConfiguration(
         return CaptureSettings(largest?.width ?: 0, largest?.height ?: 0, requested.maxOfOrNull { it.fps } ?: 0)
     }
 
-    /** Uma câmera compartilhada só produz um stream; nesse caso prevalece o maior zoom pedido. */
-    fun resolvedCaptureZoom(cameraId: String): Float = buildList {
-        if (courtCameraId == cameraId) add(captureZoom)
-        if (scoreboardEnabled && cameraIdFor(OverlayLayer.SCOREBOARD) == cameraId) add(scoreboardCaptureZoom)
-        if (clockEnabled && cameraIdFor(OverlayLayer.CLOCK) == cameraId) add(clockCaptureZoom)
-    }.maxOrNull()?.coerceIn(1f, 8f) ?: 1f
+    /**
+     * Camadas que dividem a câmera com [layer], sem contar ela mesma. Quando a lista não está vazia,
+     * a resolução e o FPS escolhidos na tela dessa camada são apenas um pedido: [resolvedCaptureSettings]
+     * atende a exigência maior entre todas, e a tela precisa dizer isso em vez de fingir independência.
+     */
+    fun layersSharingCameraWith(layer: OverlayLayer?): List<String> {
+        val camera = if (layer == null) courtCameraId else cameraIdFor(layer)
+        if (camera.isBlank()) return emptyList()
+        return buildList {
+            if (layer != null && courtCameraId == camera) add("quadra")
+            OverlayLayer.entries.forEach { other ->
+                if (other != layer && enabled(other) && cameraIdFor(other) == camera) add(other.label.lowercase())
+            }
+        }
+    }
 }
 
 data class CaptureSettings(val width: Int = 0, val height: Int = 0, val fps: Int = 0) {
@@ -125,7 +176,13 @@ enum class OverlayLayer(val label: String) {
     SCOREBOARD("Placar"), CLOCK("Cronômetro"),
 }
 
-enum class ScoreboardSource(val label: String) {
+/**
+ * De onde sai a imagem de uma sobreposição. Vídeo acompanha movimento e custa um stream contínuo;
+ * foto usa o JPEG cheio do sensor, muito mais nítido para dígitos pequenos, ao preço de atualizar
+ * só a cada intervalo. Placar quase não se move e ganha com foto; cronômetro corre e costuma pedir
+ * vídeo — mas quem decide é quem está no ginásio, então a opção vale para as duas.
+ */
+enum class OverlaySource(val label: String) {
     VIDEO("Vídeo · acompanha movimento"),
     PHOTO_EVERY_SECOND("Foto alta · intervalo configurável"),
 }

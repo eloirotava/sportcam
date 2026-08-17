@@ -92,11 +92,18 @@ class DualCameraEngine(
      * entrega bitmaps convertidos, que é o caminho em CPU.
      */
     @SuppressLint("MissingPermission")
-    fun start(plan: Plan, rotation: Int, outputs: Pair<Surface, Surface>? = null) {
+    fun start(
+        plan: Plan,
+        rotation: Int,
+        outputs: Pair<Surface, Surface>? = null,
+        conversionWidths: Pair<Int, Int>? = null,
+    ) {
         stop()
         this.plan = plan
-        courtTargetWidth = plan.size.width
-        scoreboardTargetWidth = plan.size.width
+        // Converter no tamanho de captura seria pagar por pixel que o recorte descarta logo depois.
+        // Sem valor informado, mantém o comportamento antigo de converter o quadro inteiro.
+        courtTargetWidth = conversionWidths?.first?.takeIf { it in 1..plan.size.width } ?: plan.size.width
+        scoreboardTargetWidth = conversionWidths?.second?.takeIf { it in 1..plan.size.width } ?: plan.size.width
         rotationDegrees = ((rotation % 360) + 360) % 360
         running = true
         frameCounts.clear()
@@ -268,7 +275,7 @@ class DualCameraEngine(
     }
 
     companion object {
-        /** Tamanhos de conversão, não de captura: o sensor entrega 1080p e só o desenho encolhe. */
+        /** Tamanhos de conversão usados só até o plano chegar; a captura em si não é limitada aqui. */
         const val COURT_TARGET_WIDTH = 1280
         const val SCOREBOARD_TARGET_WIDTH = 640
         private const val RATE_REPORT_MS = 2_000L

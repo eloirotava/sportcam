@@ -19,29 +19,47 @@ Esta primeira fatia é propositalmente pequena, mas executável:
 - projeto Android nativo (Kotlin, minSdk 31);
 - preview CameraX com pedido de permissão em runtime;
 - enquadramento 16:9 configurável sobre a imagem;
-- placar e cronômetro filmados opcionais, cada um com quadrilátero de quatro pontos
-  para planificar a origem e retângulo próprio de destino na composição;
+- placar e cronômetro opcionais, cada um com quadrilátero de quatro pontos para planificar a
+  origem, retângulo próprio de destino na composição e escolha entre vídeo e foto em alta;
 - seleção independente da câmera da quadra, do placar e do cronômetro, incluindo lentes traseiras,
-  frontais e externas anunciadas pelo Android;
+  frontais e externas anunciadas pelo Android, identificadas pelo ângulo de visão em vez da focal
+  em milímetros — num sensor de celular o milímetro só significaria algo com a equivalência de 35 mm,
+  e o que decide a escolha é quanto de quadra cabe no quadro;
 - compartilhamento de um único stream quando duas ou três camadas escolhem a mesma câmera;
-- seleção de resolução e FPS por fonte; camadas que compartilham câmera usam o perfil
-  mais exigente entre elas;
+- seleção de resolução e FPS por fonte, **sem teto de resolução**: a lista traz todos os tamanhos que
+  o aparelho oferece, cada um com proporção, megapixels e a taxa que ele sustenta, e a escolha é do
+  operador. Camadas que compartilham câmera usam o perfil mais exigente entre elas;
 - saída configurável em 360p, 540p, 720p ou 1080p e 15, 20, 24, 30 ou 60 fps,
   independente do bitrate;
-- controles de zoom e deslocamento do recorte, retângulo livre do placar na composição e
-  servidor/chave do YouTube, persistidos localmente;
+- **um recorte real por fonte**, na geometria natural de cada uma: o retângulo 16:9 na quadra, o
+  quadrilátero de quatro pontos no placar e no cronômetro. Cada tela tem também uma lupa que só
+  amplia a visualização, para posicionar com precisão o que ocupa poucos pixels do quadro;
+- retângulo livre do placar na composição e servidor/chave do YouTube, persistidos localmente;
 - ícone opcional sobre a transmissão, carregado de PNG ou outra imagem, com transparência,
   posição e tamanho configuráveis e persistidos, além de opção para transformar fundo branco
   em transparente com borda suavizada;
 - diagnóstico das câmeras físicas e dos pares simultâneos anunciados pelo aparelho;
-- testes unitários para as regras geométricas.
+- **configuração remota pelo navegador**: o app serve um site com as mesmas telas e abre um túnel
+  reverso [cf-p](https://github.com/eloirotava/cf-p) para alcançá-lo de outro aparelho, o que
+  resolve o celular no 4G do ginásio — atrás de CGNAT ele não tem endereço para receber conexão.
+  A transmissão não passa pelo túnel: o RTMPS continua saindo direto para o YouTube, e por ali só
+  trafega configuração em JSON e um JPEG de prévia quando o operador pede;
+- testes unitários para as regras geométricas, para a serialização da configuração, para o
+  servidor HTTP e para o protocolo do túnel.
 
-A interface é dividida em **Quadra**, onde o retângulo 16:9 é
-movido por arraste e redimensionado pelas duas alças diagonais; **Placar**, onde são
-ajustados a área amarela capturada, a câmera e o zoom de visualização; **Cronômetro**,
-com os mesmos ajustes para a área roxa; **Ícone**, que mostra a composição enquanto
-ajusta a imagem, posição e tamanho; e **Ao vivo**, que reúne a composição e os
-dados do YouTube. A tela **Vídeo** escolhe resolução, FPS, codec e bitrate de saída.
+A interface tem nove telas, cada uma com um assunto só. As três fontes têm a mesma forma —
+câmera, resolução, FPS, recorte — porque são a mesma decisão tomada três vezes: **Quadra**, onde
+o retângulo 16:9 é movido por arraste e redimensionado pelas duas alças diagonais; **Placar**,
+onde se ajustam os quatro cantos da área amarela; e **Cronômetro**, com os mesmos ajustes para a
+área roxa e a mesma escolha entre vídeo e foto. **Ícone** mostra a composição enquanto ajusta
+imagem, posição e tamanho. **Vídeo** reúne o que sai do aparelho: resolução, FPS, codec, bitrate,
+protocolo de ingestão, motor de composição e rotação — protocolo fica ao lado do codec porque
+RTMPS aceita só H.264, e a restrição precisa estar visível onde ela é decidida. **YouTube** guarda
+a configuração que se faz uma vez: servidor, chave, OAuth, título, privacidade e latência.
+**Ao vivo** fica com o dia de jogo: criar a live, o link, iniciar e o status. **Teste** faz o
+diagnóstico das câmeras. **Remoto** liga o site e o túnel: porta, endereço e token do cf-p, usuário
+e senha de acesso — cinco campos digitados e uma chave só, porque o site sem túnel não teria como
+ser alcançado do outro lado do ginásio.
 O botão de play codifica a composição em H.264/H.265, faz a captura principal seguir
 o FPS de saída quando ela está em “Seguir saída”, captura o microfone em AAC mono a
 44,1 kHz e publica por RTMPS ou ingestão HLS. Quando o aparelho anuncia o grupo
@@ -70,6 +88,45 @@ a incompatibilidade e mantém somente a quadra.
 O botão alterna entre iniciar e encerrar a transmissão e mostra falhas de conexão ou
 codificação na própria tela. A chave fica nas preferências privadas do app, com backup desabilitado; uma versão de
 produção deverá protegê-la com Android Keystore.
+
+## A fazer
+
+O próximo trabalho está organizado em [`docs/roadmap.md`](docs/roadmap.md). A
+prioridade atual é permitir configurar e operar o SportCam remotamente pelo
+navegador, deixando o telefone enquadrado e dedicado à captura e à transmissão
+durante o jogo.
+
+## Capturar acima da resolução transmitida
+
+A quadra não é enviada inteira: o que vai ao ar é um retângulo 16:9 recortado dela. Captura e saída
+são, portanto, duas coisas diferentes, e igualar as duas desperdiça a única margem que existe.
+
+Com captura em 1920×1080 e recorte de 2×, sobram 960×540 pixels reais, que sobem esticados até os
+1280×720 da saída — a imagem fica mole por aritmética, não por falta de lente. Com o mesmo recorte
+sobre um quadro de 3840 px de largura, sobram 1920×1080 reais para reduzir a 720p; reduzir ainda
+média o ruído, então o resultado sai mais limpo que 720p capturado direto.
+
+Por isso o app não impõe teto de resolução. Cada aparelho anuncia os tamanhos que oferece e, para
+cada um, a duração mínima do quadro — a lista mostra a taxa que dali resulta, e o operador escolhe.
+Um S22 e um S25 Ultra não têm o mesmo limite, e fixar no código o que um deles aprovou seria decidir
+pelo outro. Quando o tamanho escolhido declara taxa menor que a pedida, o app avisa e transmite
+assim mesmo: declaração de aparelho erra nos dois sentidos, e quem confere é o jogo.
+
+Deixada em **Automática**, a resolução vira uma conta em vez de um teto: o menor tamanho que ainda
+entrega pixel real ao enquadramento atual, entre os que sustentam a taxa pedida. Recorte de 2× para
+sair em 720p pede 3200 px de largura; abaixo disso a imagem estica, acima disso não melhora.
+
+O custo aparece na composição por CPU, onde converter YUV para bitmap se paga por pixel: converter o
+sensor inteiro para descartar quase tudo no recorte seguinte torraria o aparelho sem ganho nenhum.
+A conversão então acontece na largura que a composição realmente consome, e não na de captura, de
+modo que subir a resolução do sensor não encarece o laço. Na GPU o recorte é coordenada de textura
+e já era de graça.
+
+Vale lembrar que existe um caminho ainda mais barato para o mesmo efeito, quando o HAL o oferece:
+pedir o recorte ao próprio sensor por `SCALER_CROP_REGION`, que devolve a região já recortada no
+tamanho pedido, sem mover os pixels excedentes. O inventário de câmeras já detecta esse suporte em
+[`PerPhysicalZoom`](app/src/main/java/dev/cascam/camera/CameraCapabilities.kt); `CONTROL_ZOOM_RATIO`
+não serve sozinho porque é sempre centralizado, e o recorte da quadra tem deslocamento.
 
 ## Galaxy S22 e duas câmeras
 
@@ -239,6 +296,34 @@ gradle assembleDebug
 ```
 
 O APK de debug será criado em `app/build/outputs/apk/debug/app-debug.apk`.
+
+### Assinatura das builds de teste
+
+Sem chave fixa, o AGP inventa um `debug.keystore` novo em cada máquina, e todo APK publicado pelo
+CI sai assinado por uma chave diferente. O Android recusa atualizar por cima de assinatura que não
+confere, então cada release exigiria desinstalar a anterior — e como o app guarda servidor, chave do
+YouTube e os cantos do placar em preferências com `allowBackup="false"`, desinstalar apaga a
+configuração inteira.
+
+Por isso o workflow **Release APK** restaura um keystore fixo a partir do secret
+`SPORTCAM_DEBUG_KEYSTORE`, que guarda o arquivo em base64. Ele é independente da chave de upload do
+Play, que continua vindo de `SPORTCAM_KEYSTORE_FILE` e companhia. Para gerar e cadastrar:
+
+```bash
+keytool -genkeypair -v -keystore sportcam-debug.keystore \
+  -storepass android -keypass android -alias androiddebugkey \
+  -keyalg RSA -keysize 2048 -validity 10950 \
+  -dname "CN=SportCam Debug, O=SportCam, C=BR"
+
+base64 -w0 sportcam-debug.keystore | gh secret set SPORTCAM_DEBUG_KEYSTORE
+```
+
+Guarde o arquivo fora do repositório: perdê-lo custa uma última desinstalação em todos os aparelhos
+que já têm o app. Cada build registra no log a impressão SHA-256 do certificado, então uma troca
+acidental de chave aparece no Action antes de aparecer no celular.
+
+Localmente o mesmo keystore vale definindo `SPORTCAM_DEBUG_KEYSTORE_FILE` com o caminho do arquivo;
+sem a variável, o comportamento é o padrão do AGP.
 
 ## Google Play
 

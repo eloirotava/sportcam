@@ -1,0 +1,134 @@
+/* Mesma paleta das telas do aparelho (res/values/styles.xml), para o site não parecer outro app. */
+:root {
+  --fundo: #090D12;
+  --painel: #121A24;
+  --acento: #73E2A7;
+  --texto: #D6DEE8;
+  --dica: #9EADBC;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 88px;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: system-ui, sans-serif;
+  font-size: 15px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1D2733;
+}
+
+h1 { margin: 0; font-size: 20px; color: var(--acento); }
+h2 { margin: 0 0 4px; font-size: 19px; color: var(--acento); }
+h3 { margin: 24px 0 0; font-size: 16px; color: var(--acento); }
+
+#status-line { color: var(--dica); font-size: 13px; }
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--painel);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+nav button {
+  flex: 1 1 auto;
+  min-width: 84px;
+  padding: 9px 8px;
+  border: 1px solid #24303E;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dica);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+nav button.selected { color: var(--fundo); background: var(--acento); border-color: var(--acento); font-weight: 600; }
+
+main { padding: 16px; max-width: 720px; margin: 0 auto; }
+
+label { display: block; margin-top: 14px; font-weight: 600; }
+label.check { font-weight: 400; display: flex; align-items: center; gap: 8px; }
+
+input[type=text], input[type=password], select, input[type=file] {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid #24303E;
+  border-radius: 6px;
+  background: var(--painel);
+  color: #FFFFFF;
+  font: inherit;
+}
+
+input[type=range] { display: block; width: 100%; margin-top: 8px; accent-color: var(--acento); }
+input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--acento); margin: 0; }
+
+button {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid #24303E;
+  border-radius: 6px;
+  background: var(--painel);
+  color: var(--texto);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary { width: 100%; background: var(--acento); color: var(--fundo); border-color: var(--acento); font-weight: 600; }
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row button { margin-top: 8px; }
+
+.hint { color: var(--dica); font-size: 13px; margin: 6px 0 0; }
+
+.preview-block { margin-top: 16px; }
+
+canvas, .preview-block img {
+  display: block;
+  width: 100%;
+  background: #000000;
+  border: 1px solid #24303E;
+  border-radius: 6px;
+  touch-action: none;
+}
+
+pre {
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--painel);
+  border-radius: 6px;
+  color: var(--texto);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--painel);
+  border-top: 1px solid #1D2733;
+}
+
+footer button { margin: 0; flex: 1 1 auto; max-width: 420px; }
+#save-status { color: var(--dica); font-size: 13px; }

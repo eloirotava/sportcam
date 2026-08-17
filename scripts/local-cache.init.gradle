@@ -1,3 +1,12 @@
+// Puxa para o cache do Gradle tudo o que a compilação vai pedir, enquanto ainda há rede. O build em
+// si roda dentro de um namespace de rede isolado (veja build-local-sandbox.sh), então qualquer
+// artefato que falte aqui reaparece lá como "No cached version ... available for offline mode".
+//
+// As duas últimas configurações não são de dependências do app: são ferramentas que o Gradle resolve
+// por conta própria na hora de compilar. O compilador Kotlin baixa `kotlin-build-tools-impl`, e o
+// aapt2 vem do Google Maven em vez do SDK instalado. Para o aapt2 há também o caminho de apontar o
+// binário local, com `-Pandroid.aapt2FromMavenOverride=$ANDROID_HOME/build-tools/<versão>/aapt2`,
+// que dispensa o download sem depender do número de build embutido na versão do AGP.
 gradle.afterProject { project ->
     if (project.path == ':app') {
         project.tasks.register('resolveSportCamLocalDependencies') {
@@ -6,9 +15,16 @@ gradle.afterProject { project ->
                     'debugCompileClasspath',
                     'debugRuntimeClasspath',
                     'debugUnitTestCompileClasspath',
-                    'releaseUnitTestCompileClasspath'
+                    'debugUnitTestRuntimeClasspath',
+                    'releaseUnitTestCompileClasspath',
+                    'kotlinBuildToolsApiClasspath'
                 ].each { configurationName ->
-                    def files = project.configurations.getByName(configurationName).incoming.artifactView {
+                    def configuration = project.configurations.findByName(configurationName)
+                    if (configuration == null) {
+                        println "${configurationName}: ausente nesta versão dos plugins, ignorado"
+                        return
+                    }
+                    def files = configuration.incoming.artifactView {
                         componentFilter { componentId ->
                             componentId instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier
                         }

@@ -6,6 +6,20 @@ val playKeyAlias = providers.environmentVariable("SPORTCAM_KEY_ALIAS").orNull
 val playKeyPassword = providers.environmentVariable("SPORTCAM_KEY_PASSWORD").orNull
 val hasPlaySigning = listOf(playKeystoreFile, playKeystorePassword, playKeyAlias, playKeyPassword).all { !it.isNullOrBlank() }
 
+// Chave fixa para as builds de teste. Sem ela, o AGP inventa um debug.keystore novo em cada máquina
+// — e cada APK publicado pelo CI sai com assinatura diferente, o que obriga a desinstalar a versão
+// anterior para atualizar. Como o app guarda servidor, chave do YouTube e os cantos do placar em
+// preferências com backup desligado, desinstalar apaga a configuração inteira.
+//
+// O keystore vem do secret SPORTCAM_DEBUG_KEYSTORE, que o workflow decodifica para um arquivo. Sem a
+// variável definida, o comportamento é o de antes: cada build assina com uma chave nova. As senhas
+// têm o valor convencional de keystore de debug e podem ser trocadas pelo ambiente.
+val debugKeystoreFile = providers.environmentVariable("SPORTCAM_DEBUG_KEYSTORE_FILE").orNull
+val debugKeystorePassword = providers.environmentVariable("SPORTCAM_DEBUG_KEYSTORE_PASSWORD").orNull ?: "android"
+val debugKeyAlias = providers.environmentVariable("SPORTCAM_DEBUG_KEY_ALIAS").orNull ?: "androiddebugkey"
+val debugKeyPassword = providers.environmentVariable("SPORTCAM_DEBUG_KEY_PASSWORD").orNull ?: "android"
+val hasFixedDebugSigning = !debugKeystoreFile.isNullOrBlank() && file(debugKeystoreFile).exists()
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -19,8 +33,8 @@ android {
         applicationId = "dev.cascam"
         minSdk = 31
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.0.7"
+        versionCode = 10
+        versionName = "0.0.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -30,6 +44,14 @@ android {
                 storePassword = playKeystorePassword
                 keyAlias = playKeyAlias
                 keyPassword = playKeyPassword
+            }
+        }
+        if (hasFixedDebugSigning) {
+            getByName("debug") {
+                storeFile = file(requireNotNull(debugKeystoreFile))
+                storePassword = debugKeystorePassword
+                keyAlias = debugKeyAlias
+                keyPassword = debugKeyPassword
             }
         }
     }
@@ -57,4 +79,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraX")
     implementation("androidx.camera:camera-view:$cameraX")
     testImplementation("junit:junit:4.13.2")
+    // org.json vem do Android no aparelho, mas o android.jar dos testes unitários é o mockável:
+    // toda chamada lançaria "Stub!". Esta é a mesma implementação, só que de verdade, e vale
+    // apenas para os testes — o app continua usando a do sistema, sem nada a mais no APK.
+    testImplementation("org.json:json:20240303")
 }

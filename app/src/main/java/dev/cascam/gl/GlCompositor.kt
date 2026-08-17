@@ -12,11 +12,10 @@ import android.os.HandlerThread
 import android.util.Size
 import android.view.Surface
 import dev.cascam.config.BroadcastConfiguration
-import dev.cascam.config.ScoreboardSource
+import dev.cascam.config.OverlayLayer
 import dev.cascam.geometry.NormalizedRect
 import dev.cascam.geometry.LogoGeometry
 import dev.cascam.geometry.StillFrameGeometry
-import dev.cascam.geometry.CaptureZoomGeometry
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -270,30 +269,27 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
         val quarterTurn = (courtDegrees % 180 != 0) != streamSwapsAxes(courtMatrix)
         val cropWidth = if (quarterTurn) captureSize.height else captureSize.width
         val cropHeight = if (quarterTurn) captureSize.width else captureSize.height
-        val configuredCrop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
-        val crop = CaptureZoomGeometry.fromZoomedPreview(configuredCrop, config.captureZoom)
+        val crop = NormalizedRect.adjustable16x9(cropWidth, cropHeight, config.cropZoom, config.cropPanX, config.cropPanY)
         val courtMap = Homography.multiply(rotation, Homography.unitSquareTo(crop.left, crop.top, crop.width, crop.height))
-        val scoreboardSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
-        val scoreboardRotation = Homography.inverseRotation(sourceRotations[scoreboardSource] ?: courtDegrees)
-        val stillSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.SCOREBOARD)
-        val stillSize = stillSizes[stillSource]
-        val stillCorners = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillSize != null) {
-            StillFrameGeometry.fromVideoPreview(
-                config.scoreboardCorners, stillSize.width, stillSize.height, config.scoreboardCaptureZoom,
-            )
-        } else config.scoreboardCorners.map { point ->
-            CaptureZoomGeometry.fromZoomedPreview(point, config.scoreboardCaptureZoom)
+
+        // Placar e cronômetro seguem exatamente a mesma regra; só muda a camada. Manter os dois
+        // caminhos escritos separados foi o que deixou a foto existir só para o placar.
+        fun cornersOf(layer: OverlayLayer): List<dev.cascam.geometry.NormalizedPoint> {
+            val marked = if (layer == OverlayLayer.SCOREBOARD) config.scoreboardCorners else config.clockCorners
+            val stillSize = stillSizes[config.cameraIdFor(layer)]
+            return if (config.usesPhoto(layer) && stillSize != null) {
+                StillFrameGeometry.fromVideoPreview(marked, stillSize.width, stillSize.height)
+            } else marked
         }
         // JPEG não recebe a correção manual; ela pertence apenas ao vídeo em SurfaceTexture.
-        val scoreboardMap = if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND) {
-            Homography.unitSquareTo(stillCorners)
-        } else Homography.multiply(scoreboardRotation, Homography.unitSquareTo(stillCorners))
-        val clockSource = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
-        val clockRotation = Homography.inverseRotation(sourceRotations[clockSource] ?: courtDegrees)
-        val clockCorners = config.clockCorners.map { point ->
-            CaptureZoomGeometry.fromZoomedPreview(point, config.clockCaptureZoom)
+        fun mapOf(layer: OverlayLayer): FloatArray {
+            val unitSquare = Homography.unitSquareTo(cornersOf(layer))
+            if (config.usesPhoto(layer)) return unitSquare
+            val layerRotation = Homography.inverseRotation(sourceRotations[config.cameraIdFor(layer)] ?: courtDegrees)
+            return Homography.multiply(layerRotation, unitSquare)
         }
-        val clockMap = Homography.multiply(clockRotation, Homography.unitSquareTo(clockCorners))
+        val scoreboardMap = mapOf(OverlayLayer.SCOREBOARD)
+        val clockMap = mapOf(OverlayLayer.CLOCK)
         val destination = config.scoreboardDestination
         val clockDestination = config.clockDestination
 
@@ -307,38 +303,32 @@ class GlCompositor(private val onStatus: (String) -> Unit) {
                 bindVideoProgram()
 
                 drawQuad(courtTexture, courtMatrix, courtMap, -1f, 1f, 1f, -1f)
-                if (config.scoreboardEnabled) {
-                    val stillTexture = stillTextures[stillSource]
-                    if (config.scoreboardSource == ScoreboardSource.PHOTO_EVERY_SECOND && stillTexture != null) {
-                        drawStill(
-                            stillTexture, scoreboardMap,
-                            destination.left * 2f - 1f, 1f - destination.top * 2f,
-                            destination.right * 2f - 1f, 1f - destination.bottom * 2f,
-                        )
+
+                // Uma sobreposição sai de uma foto JPEG ou do vídeo da câmera que ela escolheu, e
+                // essa câmera pode ser a mesma da quadra ou da outra camada — daí a busca pelo
+                // índice em vez de uma textura fixa por camada.
+                fun drawOverlay(layer: OverlayLayer, map: FloatArray, area: NormalizedRect) {
+                    val camera = config.cameraIdFor(layer)
+                    val left = area.left * 2f - 1f
+                    val top = 1f - area.top * 2f
+                    val right = area.right * 2f - 1f
+                    val bottom = 1f - area.bottom * 2f
+                    if (config.usesPhoto(layer)) {
+                        val stillTexture = stillTextures[camera] ?: return
+                        drawStill(stillTexture, map, left, top, right, bottom)
                         bindVideoProgram()
-                    } else if (config.scoreboardSource == ScoreboardSource.VIDEO) {
-                        val scoreboardIndex = sourceIds.indexOf(stillSource)
-                        drawQuad(
-                            when (scoreboardIndex) { 0 -> courtTexture; 2 -> clockTexture; else -> scoreboardTexture },
-                            when (scoreboardIndex) { 0 -> courtMatrix; 2 -> clockMatrix; else -> scoreboardMatrix },
-                            scoreboardMap,
-                            destination.left * 2f - 1f, 1f - destination.top * 2f,
-                            destination.right * 2f - 1f, 1f - destination.bottom * 2f,
-                        )
+                        return
                     }
-                }
-                if (config.clockEnabled) {
-                    val clockCamera = config.cameraIdFor(dev.cascam.config.OverlayLayer.CLOCK)
-                    val fromCourt = sourceIds.getOrNull(0) == clockCamera
-                    val fromScoreboard = sourceIds.getOrNull(1) == clockCamera
+                    val index = sourceIds.indexOf(camera)
                     drawQuad(
-                        if (fromCourt) courtTexture else if (fromScoreboard) scoreboardTexture else clockTexture,
-                        if (fromCourt) courtMatrix else if (fromScoreboard) scoreboardMatrix else clockMatrix,
-                        clockMap,
-                        clockDestination.left * 2f - 1f, 1f - clockDestination.top * 2f,
-                        clockDestination.right * 2f - 1f, 1f - clockDestination.bottom * 2f,
+                        when (index) { 0 -> courtTexture; 2 -> clockTexture; else -> scoreboardTexture },
+                        when (index) { 0 -> courtMatrix; 2 -> clockMatrix; else -> scoreboardMatrix },
+                        map, left, top, right, bottom,
                     )
                 }
+
+                if (config.scoreboardEnabled) drawOverlay(OverlayLayer.SCOREBOARD, scoreboardMap, destination)
+                if (config.clockEnabled) drawOverlay(OverlayLayer.CLOCK, clockMap, clockDestination)
                 val currentLogoSize = logoSize
                 if (config.logoEnabled && currentLogoSize != null) {
                     val logoDestination = LogoGeometry.destination(

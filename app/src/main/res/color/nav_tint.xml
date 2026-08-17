@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cor do ícone e do rótulo na navegação. O acento verde marca a tela aberta; o cinza-azulado das
+  demais é legível sem competir. Antes não havia estado nenhum: a tela ativa só era reconhecível
+  pelo que aparecia embaixo, o que com ícone no lugar do texto viraria adivinhação.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true" android:color="#73E2A7" />
+    <item android:state_pressed="true" android:color="#FFFFFF" />
+    <item android:color="#8FA0B2" />
+</selector>
